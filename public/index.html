@@ -123,6 +123,21 @@
               <span class="ops-link-copy">Lihat semua home aktif dan ringkasan akun yang terbaca.</span>
             </span>
           </a>
+          <a href="#cleanup-section" class="ops-link" data-ops-link="cleanup-section" title="Cleanup">
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 7h16"></path>
+                <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"></path>
+                <path d="M6 7l1 12a2 2 0 0 0 2 1.8h6a2 2 0 0 0 2-1.8L18 7"></path>
+                <path d="M10 11v5"></path>
+                <path d="M14 11v5"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Cleanup</span>
+              <span class="ops-link-copy">Batch archive stale no-auth slots dan rapikan slot count bila aman.</span>
+            </span>
+          </a>
           <a href="#repair-section" class="ops-link" data-ops-link="repair-section" title="Repair">
             <span class="ops-link-badge" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -275,6 +290,30 @@
               </div>
             </div>
             <div id="homes-list" class="stack"></div>
+          </section>
+
+          <section id="cleanup-section" class="panel" data-nav-section>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">HOUSEKEEPING</p>
+                <h3>Stale Slot Cleanup</h3>
+              </div>
+              <div class="header-actions">
+                <button id="refresh-cleanup-button" class="ghost-button">Refresh Cleanup Plan</button>
+                <button id="run-cleanup-button" class="warn-button">Archive Selected Stale Slots</button>
+              </div>
+            </div>
+            <p class="muted">
+              Harbor only targets isolated `codex-*` homes that still have local sessions but never
+              completed login, so they remain safe to archive as stale slots.
+            </p>
+            <label class="inline-toggle">
+              <input id="cleanup-reduce-slot-count-toggle" type="checkbox" checked />
+              <span>Also lower slot count if trailing stale slots are removed</span>
+            </label>
+            <div id="cleanup-summary" class="stack compact-stack"></div>
+            <div id="cleanup-log" class="log-box"></div>
+            <div id="cleanup-list" class="stack compact-stack"></div>
           </section>
 
           <section id="repair-section" class="panel" data-nav-section>

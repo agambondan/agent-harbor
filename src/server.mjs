@@ -496,6 +496,14 @@ function isolatedArchiveRoot(config) {
   return `${normalizePath(config.roots.isolatedProfilesRoot)}-archive`;
 }
 
+function slotOrderFromKey(slotKey) {
+  if (!/^codex-\d+$/.test(String(slotKey || ""))) {
+    return null;
+  }
+  const order = Number.parseInt(String(slotKey).replace("codex-", ""), 10);
+  return Number.isFinite(order) ? order : null;
+}
+
 async function archiveNoAuthHome(config, { homePath }) {
   const normalizedHomePath = normalizePath(homePath);
   const homes = await discoverHomes(config);
@@ -550,6 +558,130 @@ async function archiveNoAuthHome(config, { homePath }) {
     archivedSlotRoot,
     archiveRoot,
     operations,
+  };
+}
+
+async function staleSlotCleanupPlan(config) {
+  const homes = await discoverHomes(config);
+  const currentSlotCount = clampSlotCount(config.setup?.isolatedAccountSlots);
+  const candidates = [];
+
+  for (const home of homes) {
+    if (!home.canArchive || !home.slotKey) {
+      continue;
+    }
+    const slotOrder = slotOrderFromKey(home.slotKey);
+    const launcherPaths = [`code-${home.slotKey}`, home.slotKey]
+      .map((name) => path.join(normalizePath(config.roots.launcherBinDir), name));
+    const launcherExists = [];
+    for (const launcherPath of launcherPaths) {
+      if (await pathExists(launcherPath)) {
+        launcherExists.push(launcherPath);
+      }
+    }
+    candidates.push({
+      label: home.label,
+      slotKey: home.slotKey,
+      slotOrder,
+      path: home.path,
+      slotRoot: home.slotRoot,
+      sessionCount: home.sessionCount,
+      launcherPaths: launcherExists,
+      accountEmail: home.account?.email || null,
+      accountPlan: home.account?.plan || null,
+    });
+  }
+
+  candidates.sort((left, right) => (left.slotOrder || 0) - (right.slotOrder || 0));
+
+  const candidateSlotKeys = new Set(candidates.map((item) => item.slotKey));
+  const remainingOrdersIfAllCandidatesArchived = homes
+    .filter((home) => home.isIsolatedSlot && home.slotKey && !candidateSlotKeys.has(home.slotKey))
+    .map((home) => slotOrderFromKey(home.slotKey))
+    .filter(Number.isFinite);
+  const highestRemainingOrder =
+    remainingOrdersIfAllCandidatesArchived.length > 0
+      ? Math.max(...remainingOrdersIfAllCandidatesArchived)
+      : 1;
+  const suggestedSlotCount = Math.min(currentSlotCount, Math.max(1, highestRemainingOrder));
+
+  return {
+    generatedAt: nowIso(),
+    currentSlotCount,
+    candidateCount: candidates.length,
+    candidateSessionCount: candidates.reduce((sum, item) => sum + Number(item.sessionCount || 0), 0),
+    suggestedSlotCount,
+    reducibleNow: suggestedSlotCount < currentSlotCount,
+    candidates: candidates.map((item) => ({
+      ...item,
+      isTrailingCandidate: Number.isFinite(item.slotOrder) && item.slotOrder > suggestedSlotCount,
+    })),
+  };
+}
+
+async function runStaleSlotCleanup(config, { homePaths = [], reduceSlotCount = false } = {}) {
+  const plan = await staleSlotCleanupPlan(config);
+  const normalizedTargets = Array.isArray(homePaths)
+    ? homePaths.map((homePath) => normalizePath(String(homePath))).filter(Boolean)
+    : [];
+  if (normalizedTargets.length === 0) {
+    throw new Error("Choose at least one stale slot candidate to archive.");
+  }
+
+  const candidatesByPath = new Map(plan.candidates.map((item) => [normalizePath(item.path), item]));
+  const selectedCandidates = normalizedTargets
+    .map((targetPath) => candidatesByPath.get(targetPath))
+    .filter(Boolean);
+
+  if (selectedCandidates.length === 0) {
+    throw new Error("No matching stale slot candidates were selected.");
+  }
+  if (selectedCandidates.length !== normalizedTargets.length) {
+    throw new Error("Some selected homes are no longer valid stale-slot candidates.");
+  }
+
+  const results = [];
+  for (const candidate of selectedCandidates.sort((left, right) => left.slotOrder - right.slotOrder)) {
+    const result = await archiveNoAuthHome(config, { homePath: candidate.path });
+    results.push(result);
+  }
+
+  let updatedSlotCount = clampSlotCount(config.setup?.isolatedAccountSlots);
+  let slotCountChanged = false;
+  const operations = [];
+
+  if (reduceSlotCount) {
+    const homesAfterCleanup = await discoverHomes(config);
+    const remainingOrders = homesAfterCleanup
+      .filter((home) => home.isIsolatedSlot && home.slotKey)
+      .map((home) => slotOrderFromKey(home.slotKey))
+      .filter(Number.isFinite);
+    const nextSlotCount =
+      remainingOrders.length > 0
+        ? Math.max(1, Math.min(updatedSlotCount, Math.max(...remainingOrders)))
+        : 1;
+    if (nextSlotCount < updatedSlotCount) {
+      config.setup = {
+        ...config.setup,
+        isolatedAccountSlots: nextSlotCount,
+      };
+      await saveConfig(config);
+      operations.push(`Lowered isolatedAccountSlots from ${updatedSlotCount} to ${nextSlotCount}.`);
+      updatedSlotCount = nextSlotCount;
+      slotCountChanged = true;
+    } else {
+      operations.push("Slot count did not change because active or retained slots still require the current limit.");
+    }
+  }
+
+  return {
+    ok: true,
+    cleanedCount: results.length,
+    reduceSlotCount,
+    slotCountChanged,
+    updatedSlotCount,
+    operations,
+    results,
   };
 }
 
@@ -2786,6 +2918,24 @@ async function router(request, response) {
         const body = await readJsonBody(request);
         const result = await restoreBackupCatalogItem(innerConfig, {
           backupPath: String(body.backupPath || ""),
+        });
+        return jsonResponse(innerResponse, 200, result);
+      })(context);
+    }
+
+    if (pathname === "/api/cleanup/stale-slots" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const plan = await staleSlotCleanupPlan(innerConfig);
+        return jsonResponse(innerResponse, 200, plan);
+      })(context);
+    }
+
+    if (pathname === "/api/cleanup/stale-slots" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const result = await runStaleSlotCleanup(innerConfig, {
+          homePaths: Array.isArray(body.homePaths) ? body.homePaths : [],
+          reduceSlotCount: Boolean(body.reduceSlotCount),
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);

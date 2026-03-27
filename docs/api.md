@@ -29,6 +29,8 @@ Protected routes:
 - `GET /api/backups`
 - `POST /api/homes/archive`
 - `POST /api/backups/restore`
+- `GET /api/cleanup/stale-slots`
+- `POST /api/cleanup/stale-slots`
 - `GET /api/sessions`
 - `GET /api/sessions/preview`
 - `POST /api/sessions/import`
@@ -625,6 +627,82 @@ Success response:
   "operations": [
     "Backed up current target to /home/you/.codex/session_index.jsonl.pre-catalog-restore.20260327-065912.",
     "Restored /home/you/.codex/session_index.jsonl from /home/you/.codex/session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak."
+  ]
+}
+```
+
+## `GET /api/cleanup/stale-slots`
+
+Builds a cleanup plan for isolated `codex-*` homes that still contain local history but have no usable auth identity.
+
+Success response:
+
+```json
+{
+  "generatedAt": "2026-03-27T07:05:02.478Z",
+  "currentSlotCount": 4,
+  "candidateCount": 1,
+  "candidateSessionCount": 85,
+  "suggestedSlotCount": 3,
+  "reducibleNow": true,
+  "candidates": [
+    {
+      "label": "codex-4",
+      "slotKey": "codex-4",
+      "slotOrder": 4,
+      "path": "/home/you/.vscode-isolated/codex-4/codex-home",
+      "slotRoot": "/home/you/.vscode-isolated/codex-4",
+      "sessionCount": 85,
+      "launcherPaths": [
+        "/home/you/.local/bin/code-codex-4",
+        "/home/you/.local/bin/codex-4"
+      ],
+      "isTrailingCandidate": true
+    }
+  ]
+}
+```
+
+## `POST /api/cleanup/stale-slots`
+
+Archives one or more stale no-auth isolated slots in a single operation.
+
+Request body:
+
+```json
+{
+  "homePaths": [
+    "/home/you/.vscode-isolated/codex-4/codex-home"
+  ],
+  "reduceSlotCount": true
+}
+```
+
+Behavior:
+
+- only accepts paths that still appear in the current stale-slot cleanup plan
+- archives each slot using the same safe archive flow as `POST /api/homes/archive`
+- when `reduceSlotCount` is `true`, Harbor lowers `setup.isolatedAccountSlots` only if the remaining retained slots no longer need the previous maximum
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "cleanedCount": 1,
+  "reduceSlotCount": true,
+  "slotCountChanged": true,
+  "updatedSlotCount": 3,
+  "operations": [
+    "Lowered isolatedAccountSlots from 4 to 3."
+  ],
+  "results": [
+    {
+      "ok": true,
+      "home": "codex-4",
+      "archivedSlotRoot": "/home/you/.vscode-isolated-archive/codex-4.20260327-070812",
+      "archiveRoot": "/home/you/.vscode-isolated-archive"
+    }
   ]
 }
 ```

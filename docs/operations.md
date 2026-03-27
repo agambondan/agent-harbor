@@ -154,6 +154,24 @@ Restore rules:
 3. archived isolated `codex-*` slots are copied back from `~/.vscode-isolated-archive/...`
 4. archived launcher wrappers are restored together with a slot archive when present
 
+### Cleanup Stale Slots
+
+Use the `Stale Slot Cleanup` panel when you want Harbor to archive multiple no-auth isolated slots in one pass.
+
+1. open the `Stale Slot Cleanup` panel
+2. click `Refresh Cleanup Plan`
+3. review the stale slot candidates and select the ones you want
+4. leave `Also lower slot count...` enabled if you want Harbor to reduce trailing unused slot capacity when safe
+5. click `Archive Selected Stale Slots`
+6. confirm the selected slots
+
+Cleanup rules:
+
+1. Harbor only targets isolated `codex-*` homes that currently still qualify for `canArchive`
+2. the cleanup flow moves each slot into `~/.vscode-isolated-archive/...` instead of deleting it
+3. matching launcher wrappers are archived together with the slot
+4. slot count is reduced only when the retained homes no longer need the previous maximum slot number
+
 ### Restore Shared-Era History
 
 Use this when you want to pull the old chat history back from the parked shared sessions root that used to be symlinked across profiles.

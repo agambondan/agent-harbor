@@ -16,6 +16,7 @@ The project provides a small browser UI and a local backend so you can:
 - restore old symlink-era history from the parked shared sessions root back into local homes
 - preview shared-era restore counts, filter targets by account, and choose exactly which homes should receive that history
 - archive isolated `codex-*` slots that never got an `auth.json`, without deleting their session history
+- batch-clean stale no-auth slots and optionally lower configured slot count when the removed slots were trailing
 - browse Harbor-managed restore points and restore individual backup items from the web UI
 - run a health check dashboard that flags auth gaps, shared-session leaks, launcher drift, empty extension dirs, and invalid custom launch targets
 - customize where the app should look for Codex homes, shared storage, and VS Code state files
@@ -169,6 +170,17 @@ Harbor also catalogs the restore points it creates itself, including:
 - `auth.json.pre-restore-*`
 
 Each item can be restored from the UI. If the current target already exists, Harbor moves it aside first as `*.pre-catalog-restore.<timestamp>` before applying the selected backup item.
+
+### 7. Stale Slot Cleanup
+
+Harbor can also detect isolated `codex-*` homes that still contain local session history but never completed login, then archive them in one pass.
+
+The cleanup wizard:
+
+- lists only stale no-auth isolated slots
+- lets you select several slots at once
+- archives launcher wrappers together with the slot when present
+- can reduce `isolatedAccountSlots` automatically when the removed stale slots were trailing
 
 ## Safety Model
 

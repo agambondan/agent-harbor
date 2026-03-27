@@ -5,12 +5,14 @@ const state = {
   homes: [],
   healthReport: null,
   backupCatalog: null,
+  cleanupPlan: null,
   sessions: [],
   hideHomesWithoutAuth: false,
   restoreTargetPaths: [],
   restoreTargetAccountFilter: "",
   restoreTargetQuery: "",
   restoreTargetsInitialized: false,
+  cleanupTargetPaths: [],
 };
 
 const authPanel = document.querySelector("#auth-panel");
@@ -29,6 +31,10 @@ const repairLog = document.querySelector("#repair-log");
 const backupsSummary = document.querySelector("#backups-summary");
 const backupsList = document.querySelector("#backups-list");
 const backupsLog = document.querySelector("#backups-log");
+const cleanupSummary = document.querySelector("#cleanup-summary");
+const cleanupList = document.querySelector("#cleanup-list");
+const cleanupLog = document.querySelector("#cleanup-log");
+const cleanupReduceSlotCountToggle = document.querySelector("#cleanup-reduce-slot-count-toggle");
 const restoreTargetsList = document.querySelector("#restore-targets-list");
 const sessionsList = document.querySelector("#sessions-list");
 const targetHomeSelect = document.querySelector("#target-home-select");
@@ -901,6 +907,112 @@ function renderBackups() {
   });
 }
 
+function renderCleanupPlan() {
+  cleanupSummary.innerHTML = "";
+  cleanupList.innerHTML = "";
+
+  if (!state.cleanupPlan) {
+    cleanupSummary.innerHTML = `<p class="muted">No cleanup plan loaded yet.</p>`;
+    return;
+  }
+
+  const { generatedAt, candidateCount, candidateSessionCount, currentSlotCount, suggestedSlotCount, reducibleNow, candidates } =
+    state.cleanupPlan;
+  const validCandidatePaths = new Set(candidates.map((item) => item.path));
+  state.cleanupTargetPaths = state.cleanupTargetPaths.filter((targetPath) => validCandidatePaths.has(targetPath));
+  if (state.cleanupTargetPaths.length === 0 && candidates.length > 0) {
+    state.cleanupTargetPaths = candidates.map((item) => item.path);
+  }
+
+  cleanupSummary.innerHTML = `
+    <div class="health-summary-grid">
+      <article class="health-summary-card">
+        <strong>${candidateCount}</strong>
+        <span>Stale slots</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${candidateSessionCount}</strong>
+        <span>Threads parked</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${currentSlotCount}</strong>
+        <span>Configured slots</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${reducibleNow ? suggestedSlotCount : currentSlotCount}</strong>
+        <span>${reducibleNow ? "Suggested slots after cleanup" : "No slot-count reduction needed"}</span>
+      </article>
+    </div>
+    <p class="muted">Generated at ${generatedAt}</p>
+  `;
+
+  if (!candidates.length) {
+    cleanupList.innerHTML = `<p class="muted">No stale no-auth isolated slots are currently eligible for cleanup.</p>`;
+    return;
+  }
+
+  const controls = document.createElement("div");
+  controls.className = "choice-toolbar";
+  controls.innerHTML = `
+    <button class="ghost-button compact-button" data-select="all" type="button">Select All</button>
+    <button class="ghost-button compact-button" data-select="clear" type="button">Clear All</button>
+  `;
+  controls.querySelector('[data-select="all"]').addEventListener("click", () => {
+    state.cleanupTargetPaths = candidates.map((item) => item.path);
+    renderCleanupPlan();
+  });
+  controls.querySelector('[data-select="clear"]').addEventListener("click", () => {
+    state.cleanupTargetPaths = [];
+    renderCleanupPlan();
+  });
+  cleanupList.append(controls);
+
+  const summary = document.createElement("p");
+  summary.className = "muted";
+  summary.textContent = `${state.cleanupTargetPaths.length} selected · ${candidateCount} stale slot candidate${candidateCount === 1 ? "" : "s"}.`;
+  cleanupList.append(summary);
+
+  const grid = document.createElement("div");
+  grid.className = "choice-grid";
+
+  candidates.forEach((item) => {
+    const checked = state.cleanupTargetPaths.includes(item.path);
+    const card = document.createElement("label");
+    card.className = `choice-card ${checked ? "selected" : ""}`;
+    card.innerHTML = `
+      <input type="checkbox" ${checked ? "checked" : ""} />
+      <div>
+        <strong>${escapeHtml(item.label)}</strong>
+        <p>${escapeHtml(`${item.sessionCount} thread${item.sessionCount === 1 ? "" : "s"} · ${item.path}`)}</p>
+        <p>${escapeHtml(
+          item.launcherPaths?.length
+            ? `${item.launcherPaths.length} launcher file${item.launcherPaths.length === 1 ? "" : "s"} will be archived too.`
+            : "No launcher files found for this slot."
+        )}</p>
+        <p>${escapeHtml(
+          item.isTrailingCandidate
+            ? "Trailing stale slot: safe candidate for lowering slot count if selected."
+            : "Non-trailing stale slot: slot count may stay unchanged if higher slots are still active."
+        )}</p>
+      </div>
+    `;
+    card.querySelector("input").addEventListener("change", (event) => {
+      const targetPath = item.path;
+      if (event.currentTarget.checked) {
+        if (!state.cleanupTargetPaths.includes(targetPath)) {
+          state.cleanupTargetPaths.push(targetPath);
+        }
+      } else {
+        state.cleanupTargetPaths = state.cleanupTargetPaths.filter((value) => value !== targetPath);
+      }
+      renderCleanupPlan();
+    });
+    grid.append(card);
+  });
+
+  cleanupList.append(grid);
+}
+
 function populateHomeSelectors() {
   const targetValue = targetHomeSelect.value;
   const sourceValue = sourceHomeSelect.value;
@@ -1355,6 +1467,7 @@ async function refreshHomes() {
   populateHomeSelectors();
   await refreshHealth();
   await refreshBackups();
+  await refreshCleanupPlan();
 }
 
 async function refreshHealth() {
@@ -1365,6 +1478,11 @@ async function refreshHealth() {
 async function refreshBackups() {
   state.backupCatalog = await request("/api/backups");
   renderBackups();
+}
+
+async function refreshCleanupPlan() {
+  state.cleanupPlan = await request("/api/cleanup/stale-slots");
+  renderCleanupPlan();
 }
 
 async function refreshSessions() {
@@ -1551,6 +1669,7 @@ toggleNoAuthHomesButton.addEventListener("click", () => {
 });
 document.querySelector("#refresh-health-button").addEventListener("click", () => runTask(refreshHealth));
 document.querySelector("#refresh-backups-button").addEventListener("click", () => runTask(refreshBackups));
+document.querySelector("#refresh-cleanup-button").addEventListener("click", () => runTask(refreshCleanupPlan));
 document.querySelector("#refresh-homes-button").addEventListener("click", () => runTask(refreshHomes));
 document.querySelector("#refresh-sessions-button").addEventListener("click", () =>
   runTask(refreshSessions),
@@ -1617,6 +1736,51 @@ document.querySelector("#repair-all-button").addEventListener("click", () =>
       },
     ),
   ),
+);
+document.querySelector("#run-cleanup-button").addEventListener("click", () =>
+  runTask(async () => {
+    if (!state.cleanupTargetPaths.length) {
+      showToast("Choose at least one stale slot candidate.", "warning");
+      return;
+    }
+    const selectedItems = (state.cleanupPlan?.candidates || []).filter((item) =>
+      state.cleanupTargetPaths.includes(item.path),
+    );
+    await confirmAction(
+      {
+        title: "Archive selected stale slots?",
+        message:
+          "Harbor will move each selected no-auth slot into the isolated archive root instead of deleting it.",
+        confirmText: "Archive Selected Slots",
+        tone: "warn",
+        details: [
+          `Selected slots: ${selectedItems.map((item) => item.label).join(", ")}`,
+          `Selected thread count: ${selectedItems.reduce((sum, item) => sum + Number(item.sessionCount || 0), 0)}`,
+          cleanupReduceSlotCountToggle.checked
+            ? `Auto-lower slot count when possible: yes${state.cleanupPlan?.reducibleNow ? ` (current ${state.cleanupPlan.currentSlotCount} → suggested ${state.cleanupPlan.suggestedSlotCount})` : ""}`
+            : "Auto-lower slot count when possible: no",
+        ],
+      },
+      async () => {
+        const result = await request("/api/cleanup/stale-slots", {
+          method: "POST",
+          body: JSON.stringify({
+            homePaths: state.cleanupTargetPaths,
+            reduceSlotCount: cleanupReduceSlotCountToggle.checked,
+          }),
+        });
+        cleanupLog.textContent = [
+          ...result.operations,
+          ...result.results.flatMap((item) => item.operations || []),
+        ].join("\n");
+        showToast(`Archived ${result.cleanedCount} stale slot${result.cleanedCount === 1 ? "" : "s"}.`, "success");
+        await refreshConfig();
+        await refreshAccountSetup();
+        await refreshHomes();
+        await refreshSessions();
+      },
+    );
+  }),
 );
 document.querySelector("#preview-shared-history-button").addEventListener("click", () =>
   runTask(async () => {
