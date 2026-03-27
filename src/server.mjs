@@ -1014,6 +1014,77 @@ async function ensureIndexEntry(homePath, sessionId, threadName, updatedAt) {
   return rawLine;
 }
 
+async function inspectSessionSource(homePath, sessionId) {
+  const sessionFile = await findSessionFile(homePath, sessionId);
+  const entries = await readIndexEntries(homePath);
+  const sourceEntry = entries.find((entry) => entry.id === sessionId) || null;
+  const historyEntries = await readHistoryEntries(homePath, sessionId);
+  const historyThreadName =
+    historyEntries.length > 0 ? shortenThreadName(historyEntries[0].text || "") : "(untitled)";
+  const historyUpdatedAt =
+    historyEntries.length > 0
+      ? isoFromEpoch(Number(historyEntries[historyEntries.length - 1].ts))
+      : null;
+
+  if (sessionFile) {
+    if (sourceEntry?._raw) {
+      return {
+        sessionFile,
+        indexRaw: sourceEntry._raw,
+        threadName: sourceEntry.thread_name || historyThreadName,
+        updatedAt: sourceEntry.updated_at || historyUpdatedAt,
+        materialized: false,
+        historyEntries,
+      };
+    }
+
+    if (historyEntries.length > 0) {
+      const indexRaw = await ensureIndexEntry(homePath, sessionId, historyThreadName, historyUpdatedAt);
+      return {
+        sessionFile,
+        indexRaw,
+        threadName: historyThreadName,
+        updatedAt: historyUpdatedAt,
+        materialized: false,
+        historyEntries,
+      };
+    }
+
+    return {
+      sessionFile,
+      indexRaw: null,
+      threadName: "(untitled)",
+      updatedAt: null,
+      materialized: false,
+      historyEntries: [],
+    };
+  }
+
+  if (historyEntries.length > 0) {
+    return {
+      sessionFile: null,
+      indexRaw: sourceEntry?._raw || null,
+      threadName: sourceEntry?.thread_name || historyThreadName,
+      updatedAt: sourceEntry?.updated_at || historyUpdatedAt,
+      materialized: false,
+      historyEntries,
+    };
+  }
+
+  if (sourceEntry?._raw) {
+    return {
+      sessionFile: null,
+      indexRaw: sourceEntry._raw,
+      threadName: sourceEntry.thread_name || "(untitled)",
+      updatedAt: sourceEntry.updated_at || null,
+      materialized: false,
+      historyEntries: [],
+    };
+  }
+
+  throw new Error(`Session ${sessionId} not found in ${homePath}.`);
+}
+
 async function materializeSessionFromHistory(homePath, sessionId) {
   const historyEntries = await readHistoryEntries(homePath, sessionId);
   if (historyEntries.length === 0) {
@@ -1136,43 +1207,10 @@ async function materializeSessionFromHistory(homePath, sessionId) {
 }
 
 async function ensureSessionReady(homePath, sessionId) {
-  const sessionFile = await findSessionFile(homePath, sessionId);
-  const entries = await readIndexEntries(homePath);
-  const sourceEntry = entries.find((entry) => entry.id === sessionId) || null;
-  if (sessionFile) {
-    if (sourceEntry?._raw) {
-      return {
-        sessionFile,
-        indexRaw: sourceEntry._raw,
-        threadName: sourceEntry.thread_name || "(untitled)",
-        updatedAt: sourceEntry.updated_at || null,
-        materialized: false,
-      };
-    }
-
-    const historyEntries = await readHistoryEntries(homePath, sessionId);
-    if (historyEntries.length > 0) {
-      const threadName = shortenThreadName(historyEntries[0].text || "");
-      const updatedAt = isoFromEpoch(Number(historyEntries[historyEntries.length - 1].ts));
-      const indexRaw = await ensureIndexEntry(homePath, sessionId, threadName, updatedAt);
-      return {
-        sessionFile,
-        indexRaw,
-        threadName,
-        updatedAt,
-        materialized: false,
-      };
-    }
-
-    return {
-      sessionFile,
-      indexRaw: null,
-      threadName: "(untitled)",
-      updatedAt: null,
-      materialized: false,
-    };
+  const inspected = await inspectSessionSource(homePath, sessionId);
+  if (inspected.sessionFile) {
+    return inspected;
   }
-
   return materializeSessionFromHistory(homePath, sessionId);
 }
 
@@ -1430,6 +1468,184 @@ async function listSessions(config, { targetPath, sourcePath, query, limit = 120
 
 function homeByPath(homes, targetPath) {
   return homes.find((home) => home.path === targetPath) || null;
+}
+
+function compactPreviewText(text, limit = 220) {
+  const clean = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) {
+    return "";
+  }
+  if (clean.length <= limit) {
+    return clean;
+  }
+  return `${clean.slice(0, limit - 3).trimEnd()}...`;
+}
+
+function isSessionBootstrapText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  return (
+    normalized.startsWith("# agents.md instructions") ||
+    normalized.startsWith("<environment_context>") ||
+    normalized.startsWith("# context from my ide setup")
+  );
+}
+
+function extractTextFragments(value, bucket = []) {
+  if (!value) {
+    return bucket;
+  }
+  if (typeof value === "string") {
+    const clean = value.replace(/\s+/g, " ").trim();
+    if (clean) {
+      bucket.push(clean);
+    }
+    return bucket;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => extractTextFragments(item, bucket));
+    return bucket;
+  }
+  if (typeof value === "object") {
+    if (typeof value.text === "string") {
+      extractTextFragments(value.text, bucket);
+    }
+    if (typeof value.message === "string") {
+      extractTextFragments(value.message, bucket);
+    }
+    if (typeof value.content === "string" || Array.isArray(value.content)) {
+      extractTextFragments(value.content, bucket);
+    }
+    if (Array.isArray(value.summary)) {
+      extractTextFragments(value.summary, bucket);
+    }
+  }
+  return bucket;
+}
+
+function firstMeaningfulSnippet(snippets) {
+  return snippets.find((snippet) => !isSessionBootstrapText(snippet)) || snippets[0] || "";
+}
+
+async function readSessionPreview(config, { sourcePath, sessionId, targetPath = "" }) {
+  const homes = await discoverHomes(config);
+  const source = homeByPath(homes, sourcePath);
+  if (!source) {
+    throw new Error("Source home not found.");
+  }
+
+  const target = targetPath ? homeByPath(homes, targetPath) : null;
+  if (targetPath && !target) {
+    throw new Error("Target home not found.");
+  }
+
+  const inspected = await inspectSessionSource(source.path, sessionId);
+  const shellSnapshotPath = path.join(source.path, "shell_snapshots", `${sessionId}.sh`);
+  const preview = {
+    id: sessionId,
+    title: inspected.threadName,
+    updatedAt: inspected.updatedAt || null,
+    sourceLabel: source.label,
+    sourcePath: source.path,
+    sourceEmail: source.account.email,
+    sourcePlan: source.account.plan,
+    sessionFile: inspected.sessionFile,
+    sessionRelativePath: inspected.sessionFile
+      ? path.relative(source.path, inspected.sessionFile)
+      : null,
+    shellSnapshotExists: await pathExists(shellSnapshotPath),
+    shellSnapshotRelativePath: (await pathExists(shellSnapshotPath))
+      ? path.relative(source.path, shellSnapshotPath)
+      : null,
+    availableFromHistoryOnly: !inspected.sessionFile && inspected.historyEntries.length > 0,
+    historyEntryCount: inspected.historyEntries.length,
+    existsInTarget: target
+      ? Boolean(await findSessionFile(target.path, sessionId))
+      : false,
+    targetLabel: target?.label || null,
+    totalRecords: 0,
+    userMessageCount: 0,
+    assistantMessageCount: 0,
+    firstPromptSnippet: "",
+    lastPromptSnippet: "",
+    lastAssistantSnippet: "",
+    cwd: null,
+    cliVersion: null,
+    model: null,
+  };
+
+  if (!inspected.sessionFile) {
+    const historySnippets = inspected.historyEntries
+      .map((entry) => compactPreviewText(entry.text || ""))
+      .filter(Boolean);
+    preview.totalRecords = inspected.historyEntries.length;
+    preview.userMessageCount = inspected.historyEntries.length;
+    preview.firstPromptSnippet = firstMeaningfulSnippet(historySnippets);
+    preview.lastPromptSnippet = historySnippets.at(-1) || "";
+    return preview;
+  }
+
+  const stat = await fs.stat(inspected.sessionFile);
+  preview.sessionBytes = stat.size;
+
+  const raw = await fs.readFile(inspected.sessionFile, "utf8");
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  preview.totalRecords = lines.length;
+
+  const userSnippets = [];
+  const assistantSnippets = [];
+
+  for (const line of lines) {
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (parsed?.type === "session_meta") {
+      preview.cwd = parsed?.payload?.cwd || null;
+      preview.cliVersion = parsed?.payload?.cli_version || null;
+      continue;
+    }
+
+    if (parsed?.type === "turn_context") {
+      preview.model = parsed?.payload?.model || preview.model;
+      continue;
+    }
+
+    if (parsed?.type === "response_item" && parsed?.payload?.type === "message") {
+      const snippet = compactPreviewText(extractTextFragments(parsed.payload.content).join(" "));
+      if (!snippet) {
+        continue;
+      }
+      if (parsed?.payload?.role === "user") {
+        userSnippets.push(snippet);
+      } else if (parsed?.payload?.role === "assistant") {
+        assistantSnippets.push(snippet);
+      }
+    }
+  }
+
+  if (userSnippets.length === 0 && inspected.historyEntries.length > 0) {
+    userSnippets.push(
+      ...inspected.historyEntries
+        .map((entry) => compactPreviewText(entry.text || ""))
+        .filter(Boolean),
+    );
+  }
+
+  preview.userMessageCount = userSnippets.length || inspected.historyEntries.length;
+  preview.assistantMessageCount = assistantSnippets.length;
+  preview.firstPromptSnippet = firstMeaningfulSnippet(userSnippets);
+  preview.lastPromptSnippet = userSnippets.at(-1) || "";
+  preview.lastAssistantSnippet = assistantSnippets.at(-1) || "";
+
+  return preview;
 }
 
 async function copySessionArtifacts({
@@ -2290,6 +2506,17 @@ async function router(request, response) {
           limit: Number(params.get("limit") || 120),
         });
         return jsonResponse(innerResponse, 200, { sessions });
+      })(context);
+    }
+
+    if (pathname === "/api/sessions/preview" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, searchParams: params }) => {
+        const preview = await readSessionPreview(innerConfig, {
+          sourcePath: params.get("sourcePath") || "",
+          targetPath: params.get("targetPath") || "",
+          sessionId: params.get("sessionId") || "",
+        });
+        return jsonResponse(innerResponse, 200, { preview });
       })(context);
     }
 

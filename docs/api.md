@@ -28,6 +28,7 @@ Protected routes:
 - `GET /api/homes`
 - `POST /api/homes/archive`
 - `GET /api/sessions`
+- `GET /api/sessions/preview`
 - `POST /api/sessions/import`
 - `POST /api/sessions/share-current`
 - `POST /api/repair/home`
@@ -642,6 +643,64 @@ Response shape:
   ]
 }
 ```
+
+## `GET /api/sessions/preview`
+
+Builds a read-only preview for one session before import.
+
+Query params:
+
+- `sourcePath`
+  Purpose: home that currently owns the session
+- `sessionId`
+  Purpose: target session id to inspect
+- `targetPath`
+  Purpose: optional import target home so Harbor can report whether that target already has the session
+
+Example:
+
+```text
+/api/sessions/preview?sourcePath=/home/you/.vscode-isolated/codex-2/codex-home&targetPath=/home/you/.codex&sessionId=019ce71d-cc12-7b81-9839-279ca9de78c4
+```
+
+Response shape:
+
+```json
+{
+  "preview": {
+    "id": "019ce71d-cc12-7b81-9839-279ca9de78c4",
+    "title": "Reply to greeting message",
+    "updatedAt": "2026-03-13T12:13:38.193368298Z",
+    "sourceLabel": "codex-2",
+    "sourcePath": "/home/you/.vscode-isolated/codex-2/codex-home",
+    "sourceEmail": "example@gmail.com",
+    "sourcePlan": "team",
+    "sessionFile": "/home/you/.vscode-isolated/codex-2/codex-home/sessions/2026/03/13/rollout-...jsonl",
+    "sessionRelativePath": "sessions/2026/03/13/rollout-...jsonl",
+    "shellSnapshotExists": true,
+    "shellSnapshotRelativePath": "shell_snapshots/019ce71d-cc12-7b81-9839-279ca9de78c4.sh",
+    "availableFromHistoryOnly": false,
+    "historyEntryCount": 14,
+    "existsInTarget": false,
+    "targetLabel": "main",
+    "totalRecords": 42,
+    "userMessageCount": 8,
+    "assistantMessageCount": 7,
+    "firstPromptSnippet": "Please update the retry logic...",
+    "lastPromptSnippet": "Now also add validation for timeout overflow.",
+    "lastAssistantSnippet": "Done. Retry validation now clamps the timeout...",
+    "cwd": "/home/you/works/project-x",
+    "cliVersion": "0.116.0",
+    "model": "gpt-5.4"
+  }
+}
+```
+
+Preview rules:
+
+- this endpoint is read-only
+- if the live thread has not flushed into `sessions/` yet, Harbor previews from `history.jsonl` instead
+- no auth state, sqlite state, cookies, or VS Code extension state are exposed or copied
 
 ## `POST /api/sessions/import`
 

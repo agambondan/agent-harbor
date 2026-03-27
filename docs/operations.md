@@ -77,8 +77,19 @@ This keeps install/update cost low without reintroducing cross-account auth leak
 1. choose the target home in the Session Shuttle panel
 2. optionally narrow the source home
 3. search by title or session id
-4. click `Import`
-5. reopen the target Codex profile if you want to continue the imported thread from that profile
+4. click `Preview` if you want to inspect the thread first
+5. click `Import`
+6. review the preview summary shown in the confirmation modal
+7. reopen the target Codex profile if you want to continue the imported thread from that profile
+
+Preview currently shows:
+
+1. source and target homes
+2. whether the target already has that session
+3. the session JSONL path or whether Harbor must materialize it from `history.jsonl`
+4. shell snapshot presence
+5. user/assistant record counts
+6. first prompt, last prompt, and last assistant snippet when available
 
 ### Run Health Check
 

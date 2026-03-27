@@ -112,11 +112,13 @@ function openConfirmation({
   confirmText = "Continue",
   tone = "accent",
   details = [],
+  showCancel = true,
 }) {
   confirmTitle.textContent = title;
   confirmMessage.textContent = message;
   confirmSubmitButton.textContent = confirmText;
   confirmSubmitButton.className = tone === "warn" ? "warn-button" : "accent-button";
+  confirmCancelButton.classList.toggle("hidden", !showCancel);
 
   if (details.length > 0) {
     confirmDetails.classList.remove("hidden");
@@ -854,48 +856,94 @@ function renderSessions() {
         </div>
         <div class="session-actions">
           ${session.existsInTarget ? `<span class="chip warning">already in target</span>` : ""}
-          <button class="accent-button">Import</button>
+          <button class="ghost-button session-preview-button" type="button">Preview</button>
+          <button class="accent-button session-import-button" type="button">Import</button>
         </div>
       </div>
     `;
-    row.querySelector("button").addEventListener("click", () =>
+    row.querySelector(".session-preview-button").addEventListener("click", () =>
+      runTask(async () => {
+        const preview = await fetchSessionPreview(session, targetHomeSelect.value);
+        await openConfirmation({
+          title: "Session preview",
+          message:
+            "Read-only preview of the selected session. This does not copy auth state or modify the source home.",
+          confirmText: "Close",
+          details: buildSessionPreviewDetails(preview),
+          showCancel: false,
+        });
+      }),
+    );
+    row.querySelector(".session-import-button").addEventListener("click", () =>
       runTask(() =>
-        confirmAction(
-          {
-            title: "Import session ke target home?",
-            message:
-              "Session yang dipilih akan disalin ke target home yang aktif tanpa membawa auth state antar akun.",
-            confirmText: "Import Session",
-            details: [
-              `Session: ${session.title}`,
-              `Target: ${targetHomeSelect.selectedOptions[0]?.textContent || "not selected"}`,
-              overwriteToggle.checked ? "Overwrite existing target copy: yes" : "Overwrite existing target copy: no",
-            ],
-          },
-          async () => {
-            const targetPath = targetHomeSelect.value;
-            if (!targetPath) {
-              showToast("Choose a target home first.", "warning");
-              return;
-            }
-            const result = await request("/api/sessions/import", {
-              method: "POST",
-              body: JSON.stringify({
-                sourcePath: session.sourcePath,
-                targetPath,
-                sessionId: session.id,
-                overwrite: overwriteToggle.checked,
-              }),
-            });
-            showToast(result.operations.join(" "), "success");
-            await refreshHomes();
-            await refreshSessions();
-          },
-        ),
+        (async () => {
+          const targetPath = targetHomeSelect.value;
+          if (!targetPath) {
+            showToast("Choose a target home first.", "warning");
+            return;
+          }
+          const preview = await fetchSessionPreview(session, targetPath);
+          await confirmAction(
+            {
+              title: "Import session ke target home?",
+              message:
+                "Session yang dipilih akan disalin ke target home yang aktif tanpa membawa auth state antar akun.",
+              confirmText: "Import Session",
+              details: [
+                ...buildSessionPreviewDetails(preview),
+                overwriteToggle.checked
+                  ? "Overwrite existing target copy: yes"
+                  : "Overwrite existing target copy: no",
+              ],
+            },
+            async () => {
+              const result = await request("/api/sessions/import", {
+                method: "POST",
+                body: JSON.stringify({
+                  sourcePath: session.sourcePath,
+                  targetPath,
+                  sessionId: session.id,
+                  overwrite: overwriteToggle.checked,
+                }),
+              });
+              showToast(result.operations.join(" "), "success");
+              await refreshHomes();
+              await refreshSessions();
+            },
+          );
+        })(),
       ),
     );
     sessionsList.append(row);
   });
+}
+
+function buildSessionPreviewDetails(preview) {
+  const details = [
+    `Session: ${preview.title}`,
+    `Source: ${preview.sourceLabel} · ${preview.sourceEmail || "no email"}${preview.sourcePlan ? ` · plan ${preview.sourcePlan}` : ""}`,
+    preview.targetLabel
+      ? `Target: ${preview.targetLabel}${preview.existsInTarget ? " · already has this session" : ""}`
+      : null,
+    `Updated: ${preview.updatedAt || "unknown"}`,
+    preview.sessionRelativePath
+      ? `Session file: ${preview.sessionRelativePath}`
+      : preview.availableFromHistoryOnly
+        ? "Session file: not flushed yet; Harbor can materialize it from history during import."
+        : "Session file: missing in source home.",
+    preview.shellSnapshotExists
+      ? `Shell snapshot: ${preview.shellSnapshotRelativePath || "available"}`
+      : "Shell snapshot: not found",
+    `Preview counts: ${preview.userMessageCount} user · ${preview.assistantMessageCount} assistant · ${preview.totalRecords} records`,
+    preview.model ? `Model: ${preview.model}` : null,
+    preview.cwd ? `CWD: ${preview.cwd}` : null,
+    preview.firstPromptSnippet ? `First prompt: ${preview.firstPromptSnippet}` : null,
+    preview.lastPromptSnippet && preview.lastPromptSnippet !== preview.firstPromptSnippet
+      ? `Last prompt: ${preview.lastPromptSnippet}`
+      : null,
+    preview.lastAssistantSnippet ? `Last assistant: ${preview.lastAssistantSnippet}` : null,
+  ];
+  return details.filter(Boolean);
 }
 
 function appendRepairLog(payload) {
@@ -1215,6 +1263,18 @@ async function refreshSessions() {
   const data = await request(`/api/sessions?${params.toString()}`);
   state.sessions = data.sessions;
   renderSessions();
+}
+
+async function fetchSessionPreview(session, targetPath = "") {
+  const params = new URLSearchParams({
+    sourcePath: session.sourcePath,
+    sessionId: session.id,
+  });
+  if (targetPath) {
+    params.set("targetPath", targetPath);
+  }
+  const data = await request(`/api/sessions/preview?${params.toString()}`);
+  return data.preview;
 }
 
 async function boot() {

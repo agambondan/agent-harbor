@@ -132,6 +132,14 @@ It does not copy:
 
 That keeps history portable while account identity stays isolated.
 
+Before import, Harbor can now preview the session and show:
+
+- source and target homes
+- whether the target already has that thread
+- whether the portable session file already exists or still needs to be materialized from `history.jsonl`
+- shell snapshot availability
+- first prompt, last prompt, and latest assistant snippet when available
+
 The same panel also provides a one-click broadcast action:
 
 - choose a source home
