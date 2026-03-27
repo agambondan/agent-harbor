@@ -167,6 +167,24 @@
               <span class="ops-link-copy">Lihat restore point Harbor dan pulihkan item tertentu dengan aman.</span>
             </span>
           </a>
+          <a href="#audit-section" class="ops-link" data-ops-link="audit-section" title="Audit">
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 4h10"></path>
+                <path d="M7 8h10"></path>
+                <path d="M7 12h10"></path>
+                <path d="M7 16h7"></path>
+                <path d="M5 4h.01"></path>
+                <path d="M5 8h.01"></path>
+                <path d="M5 12h.01"></path>
+                <path d="M5 16h.01"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Audit</span>
+              <span class="ops-link-copy">Lihat jejak aksi Harbor seperti repair, restore, cleanup, dan auto-fix.</span>
+            </span>
+          </a>
           <a
             href="#session-shuttle-section"
             class="ops-link"
@@ -405,6 +423,36 @@
             <div id="backups-summary" class="stack compact-stack"></div>
             <div id="backups-log" class="log-box"></div>
             <div id="backups-list" class="stack"></div>
+          </section>
+
+          <section id="audit-section" class="panel" data-nav-section>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">TRACE</p>
+                <h3>Audit Log</h3>
+              </div>
+              <button id="refresh-audit-button" class="ghost-button">Refresh Audit</button>
+            </div>
+            <p class="muted">
+              Harbor keeps a local append-only audit trail for operational changes such as repair,
+              restore, cleanup, launcher writes, preset edits, and Health auto-fixes.
+            </p>
+            <div class="restore-filter-panel">
+              <div class="choice-toolbar">
+                <label class="filter-field">
+                  <span>Action Filter</span>
+                  <select id="audit-action-filter">
+                    <option value="">All actions</option>
+                  </select>
+                </label>
+                <label class="filter-field">
+                  <span>Search Audit</span>
+                  <input id="audit-query" type="search" placeholder="action, actor, target, or summary" />
+                </label>
+              </div>
+            </div>
+            <div id="audit-summary" class="stack compact-stack"></div>
+            <div id="audit-list" class="stack"></div>
           </section>
         </div>
 

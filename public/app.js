@@ -3,6 +3,9 @@ const state = {
   config: null,
   accountSetup: null,
   homes: [],
+  auditLog: null,
+  auditActionFilter: "",
+  auditQuery: "",
   healthReport: null,
   backupCatalog: null,
   backupCatalogHomeFilter: "",
@@ -29,6 +32,10 @@ const configForm = document.querySelector("#config-form");
 const accountGuide = document.querySelector("#account-guide");
 const accountSlotsList = document.querySelector("#account-slots-list");
 const accountSetupLog = document.querySelector("#account-setup-log");
+const auditSummary = document.querySelector("#audit-summary");
+const auditList = document.querySelector("#audit-list");
+const auditActionFilter = document.querySelector("#audit-action-filter");
+const auditQuery = document.querySelector("#audit-query");
 const healthSummary = document.querySelector("#health-summary");
 const healthLog = document.querySelector("#health-log");
 const healthList = document.querySelector("#health-list");
@@ -491,6 +498,20 @@ function sortBackupItems(items, sortMode) {
   return sorted;
 }
 
+function auditSearchText(item) {
+  return [
+    item.action,
+    item.actor,
+    item.summary,
+    item.targetLabel,
+    item.targetPath,
+    ...(item.operations || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function backupSearchText(item) {
   return [
     item.title,
@@ -948,6 +969,95 @@ function renderHealth() {
       button.addEventListener("click", () => runTask(() => runHealthFixAction(item, fix)));
     });
     healthList.append(card);
+  });
+}
+
+function renderAudit() {
+  auditSummary.innerHTML = "";
+  auditList.innerHTML = "";
+
+  if (!state.auditLog) {
+    auditSummary.innerHTML = `<p class="muted">No audit data loaded yet.</p>`;
+    return;
+  }
+
+  const { summary, generatedAt, items } = state.auditLog;
+  const actionOptions = [...new Set(items.map((item) => item.action).filter(Boolean))].sort(compareText);
+  state.auditActionFilter = populateFilterSelect(
+    auditActionFilter,
+    actionOptions,
+    "All actions",
+    state.auditActionFilter,
+  );
+  auditQuery.value = state.auditQuery;
+
+  const normalizedQuery = state.auditQuery.trim().toLowerCase();
+  const filteredItems = items.filter((item) => {
+    if (state.auditActionFilter && item.action !== state.auditActionFilter) {
+      return false;
+    }
+    if (normalizedQuery && !auditSearchText(item).includes(normalizedQuery)) {
+      return false;
+    }
+    return true;
+  });
+
+  auditSummary.innerHTML = `
+    <div class="health-summary-grid">
+      <article class="health-summary-card">
+        <strong>${summary.total}</strong>
+        <span>Loaded entries</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.actionTypes}</strong>
+        <span>Action types</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.actors}</strong>
+        <span>Actors</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.today}</strong>
+        <span>Entries today</span>
+      </article>
+    </div>
+    <p class="muted">${filteredItems.length}/${items.length} visible entries · Generated at ${generatedAt}</p>
+  `;
+
+  if (!items.length) {
+    auditList.innerHTML = `<p class="muted">No Harbor audit entries have been recorded yet.</p>`;
+    return;
+  }
+
+  if (!filteredItems.length) {
+    auditList.innerHTML = `<p class="muted">No audit entries matched the current filters.</p>`;
+    return;
+  }
+
+  filteredItems.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "home-card";
+    const operationsMarkup =
+      item.operations?.length > 0
+        ? `<ul class="health-listing">${item.operations.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+        : `<p class="muted">No operation details stored for this entry.</p>`;
+
+    card.innerHTML = `
+      <div class="home-head">
+        <div>
+          <h4>${escapeHtml(item.summary || item.action)}</h4>
+          <p class="muted">${escapeHtml(item.action)} · ${escapeHtml(item.actor || "unknown")} · ${escapeHtml(item.timestamp)}</p>
+        </div>
+        <span class="chip ${item.status === "error" ? "critical" : "success"}">${escapeHtml(item.status || "ok")}</span>
+      </div>
+      ${item.targetLabel ? `<p class="path">Target: ${escapeHtml(item.targetLabel)}</p>` : ""}
+      ${item.targetPath ? `<p class="path">${escapeHtml(item.targetPath)}</p>` : ""}
+      <div class="health-section-block">
+        <p class="panel-kicker">Operations</p>
+        ${operationsMarkup}
+      </div>
+    `;
+    auditList.append(card);
   });
 }
 
@@ -1856,6 +1966,7 @@ async function refreshHomes() {
   await refreshHealth();
   await refreshBackups();
   await refreshCleanupPlan();
+  await refreshAudit();
 }
 
 async function refreshHealth() {
@@ -1871,6 +1982,11 @@ async function refreshBackups() {
 async function refreshCleanupPlan() {
   state.cleanupPlan = await request("/api/cleanup/stale-slots");
   renderCleanupPlan();
+}
+
+async function refreshAudit() {
+  state.auditLog = await request("/api/audit?limit=200");
+  renderAudit();
 }
 
 async function refreshSessions() {
@@ -2057,8 +2173,20 @@ toggleNoAuthHomesButton.addEventListener("click", () => {
 });
 document.querySelector("#refresh-health-button").addEventListener("click", () => runTask(refreshHealth));
 document.querySelector("#refresh-backups-button").addEventListener("click", () => runTask(refreshBackups));
+document.querySelector("#refresh-audit-button").addEventListener("click", () => runTask(refreshAudit));
 document.querySelector("#refresh-cleanup-button").addEventListener("click", () => runTask(refreshCleanupPlan));
 document.querySelector("#refresh-homes-button").addEventListener("click", () => runTask(refreshHomes));
+auditActionFilter.addEventListener("change", () => {
+  state.auditActionFilter = auditActionFilter.value;
+  renderAudit();
+});
+auditQuery.addEventListener(
+  "input",
+  debounce(() => {
+    state.auditQuery = auditQuery.value;
+    renderAudit();
+  }, 120),
+);
 backupsHomeFilter.addEventListener("change", () => {
   state.backupCatalogHomeFilter = backupsHomeFilter.value;
   renderBackups();

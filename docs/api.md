@@ -26,6 +26,7 @@ Protected routes:
 - `POST /api/extensions/sync`
 - `GET /api/health`
 - `POST /api/health/fix`
+- `GET /api/audit`
 - `GET /api/homes`
 - `GET /api/backups`
 - `POST /api/homes/archive`
@@ -577,6 +578,53 @@ Notes:
 
 - `authMissing` is `true` when Harbor cannot read usable account identity from `auth.json`
 - `canArchive` is `true` only for isolated `codex-*` slots that currently have no auth data
+
+## `GET /api/audit`
+
+Returns the latest Harbor audit events from the local append-only audit log.
+
+Query parameters:
+
+- `limit` optional, defaults to `200`, maximum `500`
+
+Success response:
+
+```json
+{
+  "generatedAt": "2026-03-27T12:00:00.000Z",
+  "summary": {
+    "total": 18,
+    "actionTypes": 7,
+    "actors": 1,
+    "today": 6
+  },
+  "items": [
+    {
+      "id": "b863f44f-7ee0-42ab-a0d0-ef93fe68a1d2",
+      "timestamp": "2026-03-27T12:05:22.100Z",
+      "actor": "admin",
+      "action": "repair.home",
+      "status": "ok",
+      "summary": "Repaired codex-2 and reset openai.chatgpt state.",
+      "targetLabel": "codex-2",
+      "targetPath": "/home/you/.vscode-isolated/codex-2/codex-home",
+      "operations": [
+        "Detached sessions symlink from shared root.",
+        "Restored local session_index.jsonl from current shared target."
+      ],
+      "metadata": {
+        "resetOpenAIState": true
+      }
+    }
+  ]
+}
+```
+
+Notes:
+
+- audit data is read from `storage/audit-log.jsonl`
+- entries are returned newest-first
+- the log is append-only and best-effort; Harbor does not fail the underlying operation when audit append itself fails
 
 ## `POST /api/homes/archive`
 

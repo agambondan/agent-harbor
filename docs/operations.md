@@ -165,6 +165,26 @@ Restore rules:
 3. archived isolated `codex-*` slots are copied back from `~/.vscode-isolated-archive/...`
 4. archived launcher wrappers are restored together with a slot archive when present
 
+### Browse Audit Trail
+
+Use the `Audit` panel when you want a local timeline of Harbor actions that changed state.
+
+1. open the `Audit` panel
+2. click `Refresh Audit`
+3. optionally narrow the list with `Action Filter` or the search box
+4. inspect entry cards for actor, target, timestamp, status, and operation details
+5. use the audit trail to confirm what Harbor already changed before running another repair or restore
+
+Audit coverage currently includes:
+
+1. config changes and launch-setting saves
+2. launcher install or refresh actions
+3. extension sync operations
+4. repair and shared-history restore flows
+5. backup restores and stale-slot cleanup actions
+6. session import / broadcast actions
+7. Health auto-fix executions
+
 ### Cleanup Stale Slots
 
 Use the `Stale Slot Cleanup` panel when you want Harbor to archive multiple no-auth isolated slots in one pass.
@@ -228,6 +248,7 @@ Inside the project:
 
 - `storage/app-config.json`
 - `storage/session-secret.txt`
+- `storage/audit-log.jsonl`
 
 Inside Codex homes during import:
 

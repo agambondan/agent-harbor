@@ -12,6 +12,7 @@ const PUBLIC_DIR = path.join(PROJECT_ROOT, "public");
 const STORAGE_DIR = path.join(PROJECT_ROOT, "storage");
 const CONFIG_PATH = path.join(STORAGE_DIR, "app-config.json");
 const SECRET_PATH = path.join(STORAGE_DIR, "session-secret.txt");
+const AUDIT_LOG_PATH = path.join(STORAGE_DIR, "audit-log.jsonl");
 const COOKIE_NAME = "agent_harbor_session";
 const DEFAULT_PORT = Number(process.env.PORT || 4317);
 
@@ -32,6 +33,110 @@ function nowIso() {
 
 function timestampTag() {
   return nowIso().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+}
+
+function compactAuditText(value, limit = 220) {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return "";
+  }
+  return text.length <= limit ? text : `${text.slice(0, limit - 3).trimEnd()}...`;
+}
+
+function sanitizeAuditOperations(operations = [], limit = 20) {
+  return (Array.isArray(operations) ? operations : [])
+    .map((item) => compactAuditText(item, 260))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+async function appendAuditEvent({
+  actor = "unknown",
+  action = "",
+  status = "ok",
+  summary = "",
+  targetLabel = "",
+  targetPath = "",
+  operations = [],
+  metadata = {},
+}) {
+  const normalizedAction = String(action || "").trim();
+  if (!normalizedAction) {
+    return;
+  }
+
+  const event = {
+    id: crypto.randomUUID(),
+    timestamp: nowIso(),
+    actor: compactAuditText(actor, 80) || "unknown",
+    action: normalizedAction,
+    status: status === "error" ? "error" : "ok",
+    summary: compactAuditText(summary, 240) || normalizedAction,
+    targetLabel: compactAuditText(targetLabel, 120) || null,
+    targetPath: targetPath ? normalizePath(String(targetPath)) : null,
+    operations: sanitizeAuditOperations(operations),
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+  };
+
+  await fs.appendFile(AUDIT_LOG_PATH, `${JSON.stringify(event)}\n`, "utf8");
+}
+
+async function safeAppendAuditEvent(event) {
+  try {
+    await appendAuditEvent(event);
+  } catch (error) {
+    console.error("audit log append failed", error);
+  }
+}
+
+async function listAuditEvents({ limit = 200 } = {}) {
+  const cappedLimit = Math.min(500, Math.max(1, Number.parseInt(String(limit || 200), 10) || 200));
+  try {
+    const raw = await fs.readFile(AUDIT_LOG_PATH, "utf8");
+    const items = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .reverse()
+      .slice(0, cappedLimit);
+
+    const summary = {
+      total: items.length,
+      actionTypes: new Set(items.map((item) => item.action).filter(Boolean)).size,
+      actors: new Set(items.map((item) => item.actor).filter(Boolean)).size,
+      today: items.filter((item) => String(item.timestamp || "").startsWith(nowIso().slice(0, 10))).length,
+    };
+
+    return {
+      generatedAt: nowIso(),
+      summary,
+      items,
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {
+        generatedAt: nowIso(),
+        summary: {
+          total: 0,
+          actionTypes: 0,
+          actors: 0,
+          today: 0,
+        },
+        items: [],
+      };
+    }
+    throw error;
+  }
 }
 
 function defaultConfig() {
@@ -3108,7 +3213,7 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/config" && request.method === "PUT") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         innerConfig.appName = String(body.appName || innerConfig.appName || "Agent Harbor").trim();
         innerConfig.roots = {
@@ -3127,6 +3232,16 @@ async function router(request, response) {
           ),
         };
         await saveConfig(innerConfig);
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "config.update",
+          summary: "Updated Harbor path control settings.",
+          operations: [
+            `App name: ${innerConfig.appName}`,
+            `Slots: ${innerConfig.setup.isolatedAccountSlots}`,
+            `Extensions mode: ${innerConfig.setup.extensionsMode}`,
+          ],
+        });
         return jsonResponse(innerResponse, 200, sanitizeConfig(innerConfig));
       })(context);
     }
@@ -3139,14 +3254,27 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/account-setup/prepare" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const slotKey = String(body.slotKey || "").trim();
         if (!slotKey) {
           const payload = await prepareAllAccountSlots(innerConfig);
+          await safeAppendAuditEvent({
+            actor: currentSession.username,
+            action: "account-setup.prepare-all",
+            summary: `Prepared all configured account slots (${payload.results.length}).`,
+            operations: payload.results.flatMap((item) => item.operations || []),
+          });
           return jsonResponse(innerResponse, 200, payload);
         }
         const result = await prepareAccountSlot(innerConfig, slotKey);
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "account-setup.prepare-slot",
+          summary: `Prepared ${slotKey}.`,
+          targetLabel: slotKey,
+          operations: result.operations,
+        });
         return jsonResponse(innerResponse, 200, {
           ok: true,
           results: [result],
@@ -3169,7 +3297,7 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/account-setup/settings" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const slotKey = String(body.slotKey || "").trim();
         if (!/^codex-\d+$/.test(slotKey)) {
@@ -3201,6 +3329,19 @@ async function router(request, response) {
 
         const slotOrder = Number.parseInt(slotKey.replace("codex-", ""), 10);
         const slot = await accountSetupSlot(innerConfig, slotOrder);
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "account-setup.launch-settings",
+          summary: `Updated launch settings for ${slotKey}.`,
+          targetLabel: slotKey,
+          operations: [
+            `Launch mode: ${launchMode}`,
+            `Launch target: ${launchTargetPath || "none"}`,
+          ],
+          metadata: {
+            launchMode,
+          },
+        });
         return jsonResponse(innerResponse, 200, {
           ok: true,
           slot,
@@ -3209,17 +3350,36 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/launchers/install" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const result = await installLaunchers(innerConfig);
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "launchers.install",
+          summary: `Installed or updated launchers for ${result.results.length} slot(s).`,
+          operations: [
+            ...(result.sharedExtensions?.operations || []),
+            ...result.results.flatMap((item) => item.operations || []),
+          ],
+        });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/extensions/sync" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await syncSharedExtensions(innerConfig, {
           force: Boolean(body.force),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "extensions.sync",
+          summary: `Synced shared extensions (${result.copied} copied, ${result.skipped} skipped).`,
+          operations: result.operations,
+          metadata: {
+            copied: result.copied,
+            skipped: result.skipped,
+          },
         });
         return jsonResponse(innerResponse, 200, {
           ok: true,
@@ -3232,6 +3392,15 @@ async function router(request, response) {
       return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
         const homes = await discoverHomes(innerConfig);
         return jsonResponse(innerResponse, 200, { homes });
+      })(context);
+    }
+
+    if (pathname === "/api/audit" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, searchParams: params }) => {
+        const audit = await listAuditEvents({
+          limit: Number(params.get("limit") || 200),
+        });
+        return jsonResponse(innerResponse, 200, audit);
       })(context);
     }
 
@@ -3250,32 +3419,59 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/health/fix" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await runHealthFix(innerConfig, {
           action: String(body.action || ""),
           homePath: String(body.homePath || ""),
           resetOpenAIState: body.resetOpenAIState !== false,
         });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "health.fix",
+          summary: `Ran health fix ${result.action}${result.home ? ` for ${result.home}` : ""}.`,
+          targetLabel: result.home || null,
+          targetPath: String(body.homePath || ""),
+          operations: result.operations,
+          metadata: {
+            fixAction: result.action,
+          },
+        });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/homes/archive" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await archiveNoAuthHome(innerConfig, {
           homePath: String(body.homePath || ""),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "home.archive",
+          summary: `Archived ${result.home}.`,
+          targetLabel: result.home,
+          targetPath: String(body.homePath || ""),
+          operations: result.operations,
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/backups/restore" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await restoreBackupCatalogItem(innerConfig, {
           backupPath: String(body.backupPath || ""),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "backups.restore",
+          summary: `Restored backup item ${path.basename(String(body.backupPath || ""))}.`,
+          targetLabel: result.restored?.title || null,
+          targetPath: result.restored?.targetPath || "",
+          operations: result.operations,
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);
@@ -3289,22 +3485,38 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/history/restore-target-presets" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await saveRestoreTargetPreset(innerConfig, {
           presetId: String(body.presetId || ""),
           name: String(body.name || ""),
           targetPaths: Array.isArray(body.targetPaths) ? body.targetPaths : [],
         });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "history.restore-target-preset.save",
+          summary: `${result.mode === "updated" ? "Updated" : "Saved"} restore target preset ${result.preset.name}.`,
+          targetLabel: result.preset.name,
+          operations: [
+            `Resolved targets: ${result.preset.resolvedCount}/${result.preset.targetCount}`,
+          ],
+        });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/history/restore-target-presets" && request.method === "DELETE") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await deleteRestoreTargetPreset(innerConfig, {
           presetId: String(body.presetId || ""),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "history.restore-target-preset.delete",
+          summary: `Deleted restore target preset ${result.removedPreset.name}.`,
+          targetLabel: result.removedPreset.name,
+          operations: result.operations,
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);
@@ -3318,11 +3530,24 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/cleanup/stale-slots" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await runStaleSlotCleanup(innerConfig, {
           homePaths: Array.isArray(body.homePaths) ? body.homePaths : [],
           reduceSlotCount: Boolean(body.reduceSlotCount),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "cleanup.stale-slots",
+          summary: `Archived ${result.cleanedCount} stale slot(s).`,
+          operations: [
+            ...result.operations,
+            ...result.results.flatMap((item) => item.operations || []),
+          ],
+          metadata: {
+            cleanedCount: result.cleanedCount,
+            slotCountChanged: result.slotCountChanged,
+          },
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);
@@ -3352,7 +3577,7 @@ async function router(request, response) {
     }
 
     if (pathname === "/api/sessions/import" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await importSession(innerConfig, {
           sourcePath: String(body.sourcePath || ""),
@@ -3360,23 +3585,46 @@ async function router(request, response) {
           sessionId: String(body.sessionId || ""),
           overwrite: Boolean(body.overwrite),
         });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "sessions.import",
+          summary: `Imported session ${String(body.sessionId || "")} into target home.`,
+          targetPath: String(body.targetPath || ""),
+          operations: result.operations,
+          metadata: {
+            sessionId: String(body.sessionId || ""),
+            overwrite: Boolean(body.overwrite),
+          },
+        });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/sessions/share-current" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await shareCurrentSession(innerConfig, {
           sourcePath: String(body.sourcePath || ""),
           overwrite: Boolean(body.overwrite),
+        });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "sessions.share-current",
+          summary: `Broadcast latest session ${result.sessionId} from ${result.sourceLabel}.`,
+          targetLabel: result.sourceLabel,
+          targetPath: result.sourcePath,
+          operations: result.results.flatMap((item) => item.operations || []),
+          metadata: {
+            sessionId: result.sessionId,
+            targetCount: result.results.length,
+          },
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/repair/home" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const homes = await discoverHomes(innerConfig);
         const home = homeByPath(homes, String(body.homePath || ""));
@@ -3386,12 +3634,20 @@ async function router(request, response) {
         const result = await detachSharedForHome(innerConfig, home, {
           resetOpenAIState: body.resetOpenAIState !== false,
         });
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "repair.home",
+          summary: `Ran repair on ${result.home}.`,
+          targetLabel: result.home,
+          targetPath: result.path,
+          operations: result.actions,
+        });
         return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
     if (pathname === "/api/repair/all" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const homes = await discoverHomes(innerConfig);
         const results = [];
@@ -3402,18 +3658,36 @@ async function router(request, response) {
             }),
           );
         }
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "repair.all",
+          summary: `Ran repair across ${results.length} home(s).`,
+          operations: results.flatMap((item) => item.actions || []),
+        });
         return jsonResponse(innerResponse, 200, { results });
       })(context);
     }
 
     if (pathname === "/api/history/restore-shared" && request.method === "POST") {
-      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
         const body = await readJsonBody(request);
         const result = await restoreSharedEraHistory(innerConfig, {
           includeArchived: body.includeArchived !== false,
           dryRun: Boolean(body.dryRun),
           targetPaths: Array.isArray(body.targetPaths) ? body.targetPaths : [],
         });
+        if (!result.dryRun) {
+          await safeAppendAuditEvent({
+            actor: currentSession.username,
+            action: "history.restore-shared",
+            summary: `Restored shared-era history into ${result.results.length} selected home(s).`,
+            operations: result.results.flatMap((item) => item.actions || []),
+            metadata: {
+              includeArchived: result.includeArchived,
+              unresolvedSessionIds: result.unresolvedSessionIds?.length || 0,
+            },
+          });
+        }
         return jsonResponse(innerResponse, 200, {
           ok: true,
           ...result,

@@ -20,6 +20,7 @@ The project provides a small browser UI and a local backend so you can:
 - browse Harbor-managed restore points and restore individual backup items from the web UI
 - run a health check dashboard that flags auth gaps, shared-session leaks, launcher drift, empty extension dirs, and invalid custom launch targets
 - trigger direct Health auto-fixes for common issues such as launcher drift, shared-extension seeding, shared-session repair, and stale no-auth slot archiving
+- browse an append-only audit trail for Harbor actions such as repair, restore, cleanup, launcher writes, preset changes, and health auto-fixes
 - customize where the app should look for Codex homes, shared storage, and VS Code state files
 
 ## Why This Exists
@@ -180,7 +181,20 @@ The catalog can also be narrowed directly in the UI:
 - search across title, paths, kind, and notes
 - sort by newest, oldest, size, title, or kind
 
-### 7. Stale Slot Cleanup
+### 7. Audit Log
+
+Harbor keeps a local append-only audit trail for important state-changing actions.
+
+The audit panel lets you:
+
+- refresh and inspect the latest Harbor actions
+- filter by action type
+- search by actor, target, or summary text
+- review the exact operations emitted by repair, restore, cleanup, launcher, preset, shuttle, and Health auto-fix flows
+
+Audit data is stored locally in `storage/audit-log.jsonl` and is intentionally kept out of git.
+
+### 8. Stale Slot Cleanup
 
 Harbor can also detect isolated `codex-*` homes that still contain local session history but never completed login, then archive them in one pass.
 
@@ -208,6 +222,7 @@ These files are generated at runtime and ignored by git:
 
 - `storage/app-config.json`
 - `storage/session-secret.txt`
+- `storage/audit-log.jsonl`
 
 The project also keeps `storage/.gitkeep` so the directory exists in the repo.
 
@@ -249,14 +264,14 @@ Current deliberate limits:
 - no user management or RBAC
 - no background worker or queue
 - no automatic continuous sync yet
-- no session preview content yet, only metadata plus import
 - shared extensions are synced on demand or when Harbor detects an empty shared directory, not watched continuously
+- audit retention is file-based only; there is no log rotation or export yet
 
 ## Recommended Next Steps
 
 The current shape is strong enough for daily local use, but the most valuable follow-ups are:
 
-1. add session preview before import
-2. add background sync rules that copy only new sessions safely
-3. add richer audit logs for repair and import actions
-4. add explicit account labels or tags on the UI
+1. add explicit account labels or tags on the UI
+2. add audit log export / retention controls
+3. add background sync rules that copy only new sessions safely
+4. add finer-grained role separation if the tool ever moves beyond one local admin user
