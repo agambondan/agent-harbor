@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "bash": "bash .github/hooks/chronicle-hook.sh post-tool-use",
+        "powershell": "powershell -ExecutionPolicy Bypass -File .github/hooks/chronicle-hook.ps1 post-tool-use",
+        "timeoutSec": 15,
+        "type": "command"
+      }
+    ],
+    "preToolUse": [
+      {
+        "bash": "bash .github/hooks/chronicle-hook.sh pre-tool-use",
+        "powershell": "powershell -ExecutionPolicy Bypass -File .github/hooks/chronicle-hook.ps1 pre-tool-use",
+        "timeoutSec": 15,
+        "type": "command"
+      }
+    ],
+    "sessionStart": [
+      {
+        "bash": "bash .github/hooks/chronicle-hook.sh session-start",
+        "powershell": "powershell -ExecutionPolicy Bypass -File .github/hooks/chronicle-hook.ps1 session-start",
+        "timeoutSec": 15,
+        "type": "command"
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "bash": "bash .github/hooks/chronicle-hook.sh user-prompt-submitted",
+        "powershell": "powershell -ExecutionPolicy Bypass -File .github/hooks/chronicle-hook.ps1 user-prompt-submitted",
+        "timeoutSec": 15,
+        "type": "command"
+      }
+    ]
+  },
+  "version": 1
+}
