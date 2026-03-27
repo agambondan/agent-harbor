@@ -104,6 +104,7 @@ The onboarding panel is meant for fresh multi-account setup:
 - choose how many isolated account slots you want, default `3`
 - choose whether extension binaries should be `shared` or fully `isolated`
 - prepare each slot so it gets its own `user-data`, `xdg`, `cloudsdk`, optional workspace directory, and `CODEX_HOME`
+- set a per-slot default launch mode: `empty window` or `custom workspace / folder`
 - optionally point every slot at one shared extensions directory
 - seed or refresh that shared extensions directory from the main VS Code install
 - launch the slot in a fresh VS Code window from the web UI

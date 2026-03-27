@@ -58,6 +58,7 @@ function defaultConfig() {
     setup: {
       isolatedAccountSlots: 3,
       extensionsMode: "shared",
+      slotLaunchSettings: {},
     },
     auth: null,
   };
@@ -121,6 +122,10 @@ function clampSlotCount(value) {
 
 function sanitizeExtensionsMode(value) {
   return value === "isolated" ? "isolated" : "shared";
+}
+
+function sanitizeLaunchMode(value) {
+  return value === "custom" ? "custom" : "empty";
 }
 
 function shellPathWithHome(targetPath) {
@@ -224,6 +229,92 @@ async function syncSharedExtensions(config, { force = false } = {}) {
     skipped,
     operations,
   };
+}
+
+function slotLaunchSettings(config, slotKey) {
+  const saved = config.setup?.slotLaunchSettings?.[slotKey] || {};
+  const launchMode = sanitizeLaunchMode(saved.launchMode);
+  const launchTargetPath = String(saved.launchTargetPath || "").trim();
+  return {
+    launchMode,
+    launchTargetPath: launchTargetPath ? normalizePath(launchTargetPath) : "",
+  };
+}
+
+async function validateLaunchTargetPath(targetPath) {
+  if (!targetPath) {
+    return {
+      ok: false,
+      message: "Custom launch target path is required.",
+      targetType: null,
+    };
+  }
+
+  const normalizedTargetPath = normalizePath(targetPath);
+  try {
+    const stats = await fs.stat(normalizedTargetPath);
+    if (stats.isDirectory()) {
+      return {
+        ok: true,
+        normalizedTargetPath,
+        targetType: "directory",
+        message: null,
+      };
+    }
+    if (stats.isFile() && normalizedTargetPath.endsWith(".code-workspace")) {
+      return {
+        ok: true,
+        normalizedTargetPath,
+        targetType: "workspace",
+        message: null,
+      };
+    }
+    return {
+      ok: false,
+      normalizedTargetPath,
+      targetType: stats.isFile() ? "file" : "other",
+      message: "Custom launch target must be a directory or a .code-workspace file.",
+    };
+  } catch {
+    return {
+      ok: false,
+      normalizedTargetPath,
+      targetType: null,
+      message: `Custom launch target not found: ${normalizedTargetPath}`,
+    };
+  }
+}
+
+async function validateSlotLaunchSettings(config, slotKey) {
+  const settings = slotLaunchSettings(config, slotKey);
+  if (settings.launchMode !== "custom") {
+    return {
+      ...settings,
+      valid: true,
+      targetType: null,
+      validationMessage: null,
+    };
+  }
+
+  const validation = await validateLaunchTargetPath(settings.launchTargetPath);
+  return {
+    launchMode: settings.launchMode,
+    launchTargetPath: validation.normalizedTargetPath || settings.launchTargetPath,
+    valid: validation.ok,
+    targetType: validation.targetType,
+    validationMessage: validation.message,
+  };
+}
+
+async function validateConfiguredSlotLaunchTargets(config) {
+  const isolatedAccountSlots = clampSlotCount(config.setup?.isolatedAccountSlots);
+  for (let index = 1; index <= isolatedAccountSlots; index += 1) {
+    const slotKey = isolatedSlotKey(index);
+    const validation = await validateSlotLaunchSettings(config, slotKey);
+    if (!validation.valid) {
+      throw new Error(`${slotKey}: ${validation.validationMessage}`);
+    }
+  }
 }
 
 async function maybeSeedSharedExtensions(config) {
@@ -336,6 +427,7 @@ async function accountSetupSlot(config, order, discoveredHome = null) {
   const slotKey = isolatedSlotKey(order);
   const paths = isolatedSlotPaths(config, slotKey);
   const extensions = extensionsConfigForSlot(config, slotKey);
+  const launchSettings = await validateSlotLaunchSettings(config, slotKey);
   const authSummary = discoveredHome?.account || (await loadAuthSummary(paths.codexHome));
   const sessionCount =
     discoveredHome?.sessionCount ??
@@ -366,6 +458,11 @@ async function accountSetupSlot(config, order, discoveredHome = null) {
     extensionsMode: extensions.mode,
     extensionsPath: extensions.dir,
     launcherPath: path.join(normalizePath(config.roots.launcherBinDir), `code-${slotKey}`),
+    launchMode: launchSettings.launchMode,
+    launchTargetPath: launchSettings.launchTargetPath,
+    launchTargetValid: launchSettings.valid,
+    launchTargetType: launchSettings.targetType,
+    launchValidationMessage: launchSettings.validationMessage,
     account: authSummary,
     sessionCount,
   };
@@ -385,6 +482,7 @@ async function listAccountSetup(config) {
     guide: [
       "Prepare slot Account 1, Account 2, lalu Account 3 dari panel ini.",
       "Extension binaries boleh shared supaya install sekali saja, tetapi auth/runtime state tiap slot tetap terisolasi.",
+      "Setiap slot bisa dibuka sebagai empty window atau diarahkan ke custom workspace/folder dari card slot.",
       "Kalau launcher codex belum melihat extension dari VS Code utama, jalankan Sync Extensions untuk menyalin binary extension ke shared directory.",
       "Klik Launch VS Code pada satu slot, lalu sign in ke extension ChatGPT/Codex, Claude, Copilot, atau Gemini di window itu.",
       "Selesaikan login browser untuk akun yang sesuai, lalu kembali ke Harbor dan klik Refresh Slots.",
@@ -530,6 +628,10 @@ async function launchAccountSlot(config, slotKey, { dryRun = false } = {}) {
   const prepared = await prepareAccountSlot(config, slotKey);
   const paths = isolatedSlotPaths(config, slotKey);
   const extensions = extensionsConfigForSlot(config, slotKey);
+  const launchSettings = await validateSlotLaunchSettings(config, slotKey);
+  if (!launchSettings.valid) {
+    throw new Error(launchSettings.validationMessage);
+  }
   const args = [
     "--user-data-dir",
     paths.userDataDir,
@@ -540,6 +642,9 @@ async function launchAccountSlot(config, slotKey, { dryRun = false } = {}) {
     "--password-store=basic",
     "--new-window",
   ];
+  if (launchSettings.launchMode === "custom" && launchSettings.launchTargetPath) {
+    args.push(launchSettings.launchTargetPath);
+  }
 
   if (!dryRun) {
     const child = spawn("code", args, {
@@ -564,6 +669,8 @@ async function launchAccountSlot(config, slotKey, { dryRun = false } = {}) {
     preparedOperations: prepared.operations,
     launched: !dryRun,
     extensionsMode: extensions.mode,
+    launchMode: launchSettings.launchMode,
+    launchTargetPath: launchSettings.launchTargetPath || null,
     launch: {
       command: "code",
       args,
@@ -579,6 +686,7 @@ async function launchAccountSlot(config, slotKey, { dryRun = false } = {}) {
 function launcherScriptContent(config, slotKey) {
   const paths = isolatedSlotPaths(config, slotKey);
   const extensions = extensionsConfigForSlot(config, slotKey);
+  const launchSettings = slotLaunchSettings(config, slotKey);
   const comments =
     extensions.mode === "shared"
       ? "# Share extension binaries, but keep user-data, auth, and agent homes isolated."
@@ -590,6 +698,8 @@ set -euo pipefail
 ISOLATED_ROOT="${shellPathWithHome(paths.slotRoot)}"
 USER_DATA_DIR="${shellPathWithHome(paths.userDataDir)}"
 EXTENSIONS_DIR="${shellPathWithHome(extensions.dir)}"
+DEFAULT_LAUNCH_MODE="${launchSettings.launchMode}"
+DEFAULT_LAUNCH_TARGET="${launchSettings.launchTargetPath ? shellPathWithHome(launchSettings.launchTargetPath) : ""}"
 XDG_CONFIG_DIR="${shellPathWithHome(paths.xdgConfigDir)}"
 XDG_CACHE_DIR="${shellPathWithHome(paths.xdgCacheDir)}"
 XDG_DATA_DIR="${shellPathWithHome(paths.xdgDataDir)}"
@@ -608,6 +718,10 @@ mkdir -p \\
   "\${CLOUDSDK_CONFIG_DIR}"
 
 "\${HOME}/.local/bin/codex-detach-shared-sessions" --home "\${CODEX_HOME_DIR}" >/dev/null 2>&1 || true
+
+if [ "$#" -eq 0 ] && [ "\${DEFAULT_LAUNCH_MODE}" = "custom" ] && [ -n "\${DEFAULT_LAUNCH_TARGET}" ]; then
+  set -- "\${DEFAULT_LAUNCH_TARGET}"
+fi
 
 PATH_WITH_TOOLS="\${HOME}/.local/bin:\${HOME}/.local/opt/go-current/bin:\${HOME}/go/bin:\${PATH}"
 
@@ -660,6 +774,8 @@ async function installLaunchers(config) {
   const tag = timestampTag();
   const results = [];
   const sharedExtensions = await maybeSeedSharedExtensions(config);
+
+  await validateConfiguredSlotLaunchTargets(config);
 
   for (let index = 1; index <= slotCount; index += 1) {
     const slotKey = isolatedSlotKey(index);
@@ -1839,6 +1955,46 @@ async function router(request, response) {
           dryRun: Boolean(body.dryRun),
         });
         return jsonResponse(innerResponse, 200, result);
+      })(context);
+    }
+
+    if (pathname === "/api/account-setup/settings" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const slotKey = String(body.slotKey || "").trim();
+        if (!/^codex-\d+$/.test(slotKey)) {
+          return jsonResponse(innerResponse, 400, { error: "Valid slotKey is required." });
+        }
+
+        const launchMode = sanitizeLaunchMode(body.launchMode);
+        const rawTargetPath = String(body.launchTargetPath || "").trim();
+        const launchTargetPath = rawTargetPath ? normalizePath(rawTargetPath) : "";
+
+        if (launchMode === "custom") {
+          const validation = await validateLaunchTargetPath(launchTargetPath);
+          if (!validation.ok) {
+            return jsonResponse(innerResponse, 400, { error: validation.message });
+          }
+        }
+
+        innerConfig.setup = {
+          ...innerConfig.setup,
+          slotLaunchSettings: {
+            ...(innerConfig.setup?.slotLaunchSettings || {}),
+            [slotKey]: {
+              launchMode,
+              launchTargetPath,
+            },
+          },
+        };
+        await saveConfig(innerConfig);
+
+        const slotOrder = Number.parseInt(slotKey.replace("codex-", ""), 10);
+        const slot = await accountSetupSlot(innerConfig, slotOrder);
+        return jsonResponse(innerResponse, 200, {
+          ok: true,
+          slot,
+        });
       })(context);
     }
 

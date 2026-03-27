@@ -21,6 +21,7 @@ Protected routes:
 - `GET /api/account-setup`
 - `POST /api/account-setup/prepare`
 - `POST /api/account-setup/launch`
+- `POST /api/account-setup/settings`
 - `POST /api/launchers/install`
 - `POST /api/extensions/sync`
 - `GET /api/homes`
@@ -202,6 +203,11 @@ Response shape:
       "extensionsMode": "shared",
       "extensionsPath": "/home/you/.vscode-agent-hub/extensions",
       "launcherPath": "/home/you/.local/bin/code-codex-1",
+      "launchMode": "empty",
+      "launchTargetPath": "",
+      "launchTargetValid": true,
+      "launchTargetType": null,
+      "launchValidationMessage": null,
       "account": {
         "authMode": null,
         "email": null,
@@ -213,6 +219,12 @@ Response shape:
   ]
 }
 ```
+
+Notes:
+
+- `launchMode` is `empty` or `custom`
+- `launchTargetPath` is used only when `launchMode` is `custom`
+- `launchTargetValid` becomes `false` when the saved custom path is missing or not a directory / `.code-workspace` file
 
 ## `POST /api/account-setup/prepare`
 
@@ -257,6 +269,52 @@ Request body:
 {
   "slotKey": "codex-1",
   "dryRun": false
+}
+```
+
+Validation:
+
+- if the slot is configured for `custom` launch mode, the saved target must exist
+- valid custom targets are:
+  - an existing directory
+  - an existing `.code-workspace` file
+
+## `POST /api/account-setup/settings`
+
+Stores the default launch behavior for a slot.
+
+Request body:
+
+```json
+{
+  "slotKey": "codex-1",
+  "launchMode": "custom",
+  "launchTargetPath": "/home/you/work/project"
+}
+```
+
+Behavior:
+
+- `launchMode` accepts `empty` or `custom`
+- when `launchMode` is `custom`, the path is normalized and validated before saving
+- valid custom targets are:
+  - an existing directory
+  - an existing `.code-workspace` file
+- the same validation is enforced again when launching a slot or regenerating launcher scripts
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "slot": {
+    "slotKey": "codex-1",
+    "launchMode": "custom",
+    "launchTargetPath": "/home/you/work/project",
+    "launchTargetValid": true,
+    "launchTargetType": "directory",
+    "launchValidationMessage": null
+  }
 }
 ```
 

@@ -436,15 +436,79 @@ function renderAccountSetup() {
       <div class="stack compact-stack">
         <p class="path">Home: ${slot.homePath}</p>
         <p class="path">Workspace Root: ${slot.rootPath}/workspace</p>
+        <p class="path">Default Launch: ${slot.launchMode === "custom" ? "custom target" : "empty window"}</p>
+        ${
+          slot.launchTargetPath
+            ? `<p class="path">Launch Target: ${slot.launchTargetPath}</p>`
+            : `<p class="path">Launch Target: none</p>`
+        }
         <p class="path">Extensions: ${slot.extensionsMode} · ${slot.extensionsPath}</p>
         <p class="path">Launcher: ${slot.launcherPath}</p>
         <p class="muted">${slot.sessionCount} thread tersimpan di slot ini.</p>
+        ${
+          slot.launchValidationMessage
+            ? `<p class="muted launch-warning">${slot.launchValidationMessage}</p>`
+            : ""
+        }
+      </div>
+      <div class="slot-launch-config">
+        <label>
+          <span>Default Launch Mode</span>
+          <select data-role="launch-mode">
+            <option value="empty" ${slot.launchMode === "empty" ? "selected" : ""}>Empty Window</option>
+            <option value="custom" ${slot.launchMode === "custom" ? "selected" : ""}>Custom Workspace / Folder</option>
+          </select>
+        </label>
+        <label>
+          <span>Default Launch Target</span>
+          <input
+            data-role="launch-target"
+            type="text"
+            placeholder="~/work/project or /path/app.code-workspace"
+            value="${escapeHtml(slot.launchTargetPath || "")}"
+          />
+        </label>
       </div>
       <div class="slot-actions">
+        <button class="ghost-button" data-action="save-launch-settings">Save Launch Settings</button>
         <button class="ghost-button" data-action="prepare">Prepare Slot</button>
-        <button class="accent-button" data-action="launch">Launch VS Code</button>
+        <button class="accent-button" data-action="launch" ${slot.launchMode === "custom" && !slot.launchTargetValid ? "disabled" : ""}>Launch VS Code</button>
       </div>
     `;
+
+    card.querySelector('[data-action="save-launch-settings"]').addEventListener("click", () =>
+      runTask(() =>
+        confirmAction(
+          {
+            title: `Save launch settings for ${slot.displayName}?`,
+            message:
+              "Harbor will store the default launch mode for this slot and validate the custom path if custom mode is selected.",
+            confirmText: "Save Launch Settings",
+            details: [
+              `Mode: ${card.querySelector('[data-role=\"launch-mode\"]').value}`,
+              `Target: ${card.querySelector('[data-role=\"launch-target\"]').value.trim() || "none"}`,
+            ],
+          },
+          async () => {
+            await request("/api/account-setup/settings", {
+              method: "POST",
+              body: JSON.stringify({
+                slotKey: slot.slotKey,
+                launchMode: card.querySelector('[data-role="launch-mode"]').value,
+                launchTargetPath: card.querySelector('[data-role="launch-target"]').value.trim(),
+              }),
+            });
+            showToast(
+              `Launch settings updated for ${slot.displayName}. Reinstall launchers if you also use terminal wrappers.`,
+              "success",
+            );
+            await refreshAccountSetup();
+            await refreshHomes();
+            await refreshSessions();
+          },
+        ),
+      ),
+    );
 
     card.querySelector('[data-action="prepare"]').addEventListener("click", () =>
       runTask(() =>
@@ -471,16 +535,30 @@ function renderAccountSetup() {
     );
 
     card.querySelector('[data-action="launch"]').addEventListener("click", () =>
-      runTask(async () => {
-        const result = await request("/api/account-setup/launch", {
-          method: "POST",
-          body: JSON.stringify({ slotKey: slot.slotKey }),
-        });
-        appendAccountSetupLog(result);
-        showToast(`Membuka ${slot.displayName} di VS Code.`, "success");
-        await refreshAccountSetup();
-        await refreshHomes();
-      }),
+      runTask(() =>
+        confirmAction(
+          {
+            title: `Launch ${slot.displayName}?`,
+            message:
+              "Harbor will launch this slot using the saved default launch mode. Save Launch Settings first if you changed the mode or target in the card.",
+            confirmText: "Launch VS Code",
+            details: [
+              `Saved mode: ${slot.launchMode === "custom" ? "custom target" : "empty window"}`,
+              `Saved target: ${slot.launchTargetPath || "none"}`,
+            ],
+          },
+          async () => {
+            const result = await request("/api/account-setup/launch", {
+              method: "POST",
+              body: JSON.stringify({ slotKey: slot.slotKey }),
+            });
+            appendAccountSetupLog(result);
+            showToast(`Membuka ${slot.displayName} di VS Code.`, "success");
+            await refreshAccountSetup();
+            await refreshHomes();
+          },
+        ),
+      ),
     );
 
     accountSlotsList.append(card);
@@ -1110,7 +1188,10 @@ document.querySelector("#prepare-all-slots-button").addEventListener("click", ()
         message:
           "Harbor will create or refresh every isolated slot defined in the current config, including runtime folders but without forcing a default workspace file.",
         confirmText: "Prepare All",
-        details: [`Total slots: ${state.config?.setup?.isolatedAccountSlots || 0}`],
+        details: [
+          `Total slots: ${state.config?.setup?.isolatedAccountSlots || 0}`,
+          "Custom launch targets will be validated before launcher regeneration continues.",
+        ],
       },
       async () => {
         const result = await request("/api/account-setup/prepare", {
