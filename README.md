@@ -158,6 +158,7 @@ If several profiles were previously wired to a shared session root, the repair f
 - restore local copies from `.bak*` snapshots when present
 - otherwise restore from the current shared target
 - optionally clear the VS Code `openai.chatgpt` state entry from `state.vscdb`
+- save reusable Recovery target presets such as `main only` or `all codex slots`
 
 ### 6. Backup Catalog
 

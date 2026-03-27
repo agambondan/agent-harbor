@@ -178,13 +178,15 @@ Cleanup rules:
 Use this when you want to pull the old chat history back from the parked shared sessions root that used to be symlinked across profiles.
 
 1. open the Recovery panel
-2. optionally filter the target list by account email or search by slot, email, or path
-3. use `Select All`, `Clear All`, `Select Visible`, or `Clear Visible` to shape the target set quickly
-4. click `Preview Shared History` to inspect how many sessions and archived files would be restored
-5. click `Restore Shared History`
-6. confirm the preview summary
-7. let Harbor merge missing sessions and archived history into the selected local homes
-8. reopen the affected VS Code windows so the restored history is visible in the extension
+2. optionally save the current target selection as a preset such as `main only` or `all codex slots`
+3. apply a saved preset if you want to reuse a known target group
+4. optionally filter the target list by account email or search by slot, email, or path
+5. use `Select All`, `Clear All`, `Select Visible`, or `Clear Visible` to shape the target set quickly
+6. click `Preview Shared History` to inspect how many sessions and archived files would be restored
+7. click `Restore Shared History`
+8. confirm the preview summary
+9. let Harbor merge missing sessions and archived history into the selected local homes
+10. reopen the affected VS Code windows so the restored history is visible in the extension
 
 Harbor only restores missing local history. It does not recreate shared auth state or relink the homes.
 

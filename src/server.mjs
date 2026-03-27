@@ -59,6 +59,7 @@ function defaultConfig() {
       isolatedAccountSlots: 3,
       extensionsMode: "shared",
       slotLaunchSettings: {},
+      restoreTargetPresets: [],
     },
     auth: null,
   };
@@ -126,6 +127,51 @@ function sanitizeExtensionsMode(value) {
 
 function sanitizeLaunchMode(value) {
   return value === "custom" ? "custom" : "empty";
+}
+
+function sanitizeRestoreTargetPresetName(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function restoreTargetPresets(config) {
+  const items = Array.isArray(config.setup?.restoreTargetPresets)
+    ? config.setup.restoreTargetPresets
+    : [];
+  const seenIds = new Set();
+  const seenNames = new Set();
+  const presets = [];
+
+  for (const item of items) {
+    const name = sanitizeRestoreTargetPresetName(item?.name);
+    if (!name) {
+      continue;
+    }
+    const id = String(item?.id || crypto.randomUUID()).trim();
+    const nameKey = name.toLowerCase();
+    if (seenIds.has(id) || seenNames.has(nameKey)) {
+      continue;
+    }
+    seenIds.add(id);
+    seenNames.add(nameKey);
+    presets.push({
+      id,
+      name,
+      targetPaths: [
+        ...new Set(
+          (Array.isArray(item?.targetPaths) ? item.targetPaths : [])
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .map((value) => normalizePath(value)),
+        ),
+      ],
+    });
+  }
+
+  presets.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  return presets;
 }
 
 function shellPathWithHome(targetPath) {
@@ -1602,6 +1648,129 @@ function homeByPath(homes, targetPath) {
   return homes.find((home) => home.path === targetPath) || null;
 }
 
+async function listRestoreTargetPresets(config) {
+  const homes = await discoverHomes(config);
+  const homesByPath = new Map(homes.map((home) => [home.path, home]));
+
+  return restoreTargetPresets(config).map((preset) => {
+    const resolvedHomes = preset.targetPaths
+      .map((targetPath) => homesByPath.get(targetPath))
+      .filter(Boolean);
+    const resolvedTargetPaths = resolvedHomes.map((home) => home.path);
+    const missingTargetPaths = preset.targetPaths.filter((targetPath) => !homesByPath.has(targetPath));
+    return {
+      ...preset,
+      targetCount: preset.targetPaths.length,
+      resolvedCount: resolvedTargetPaths.length,
+      missingCount: missingTargetPaths.length,
+      resolvedTargetPaths,
+      missingTargetPaths,
+      resolvedHomes: resolvedHomes.map((home) => ({
+        label: home.label,
+        path: home.path,
+        accountEmail: home.account?.email || "",
+      })),
+    };
+  });
+}
+
+async function saveRestoreTargetPreset(config, { presetId = "", name = "", targetPaths = [] }) {
+  const presetName = sanitizeRestoreTargetPresetName(name);
+  if (!presetName) {
+    throw new Error("Preset name is required.");
+  }
+
+  const homes = await discoverHomes(config);
+  const validPaths = new Set(homes.map((home) => home.path));
+  const normalizedTargetPaths = [
+    ...new Set(
+      (Array.isArray(targetPaths) ? targetPaths : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .map((value) => normalizePath(value))
+        .filter((value) => validPaths.has(value)),
+    ),
+  ];
+
+  if (!normalizedTargetPaths.length) {
+    throw new Error("Select at least one valid target home before saving a preset.");
+  }
+
+  const presets = restoreTargetPresets(config);
+  const requestedPresetId = String(presetId || "").trim();
+  const existingIndex = requestedPresetId
+    ? presets.findIndex((item) => item.id === requestedPresetId)
+    : presets.findIndex((item) => item.name.toLowerCase() === presetName.toLowerCase());
+
+  let mode = "created";
+  let savedPreset;
+
+  if (existingIndex >= 0) {
+    mode = "updated";
+    savedPreset = {
+      ...presets[existingIndex],
+      name: presetName,
+      targetPaths: normalizedTargetPaths,
+    };
+    presets[existingIndex] = savedPreset;
+  } else {
+    savedPreset = {
+      id: crypto.randomUUID(),
+      name: presetName,
+      targetPaths: normalizedTargetPaths,
+    };
+    presets.push(savedPreset);
+  }
+
+  config.setup = {
+    ...config.setup,
+    restoreTargetPresets: presets,
+  };
+  await saveConfig(config);
+
+  const hydratedPreset = (await listRestoreTargetPresets(config)).find((item) => item.id === savedPreset.id) || {
+    ...savedPreset,
+    targetCount: savedPreset.targetPaths.length,
+    resolvedCount: savedPreset.targetPaths.length,
+    missingCount: 0,
+    resolvedTargetPaths: [...savedPreset.targetPaths],
+    missingTargetPaths: [],
+    resolvedHomes: [],
+  };
+
+  return {
+    ok: true,
+    mode,
+    preset: hydratedPreset,
+  };
+}
+
+async function deleteRestoreTargetPreset(config, { presetId = "" }) {
+  const requestedPresetId = String(presetId || "").trim();
+  if (!requestedPresetId) {
+    throw new Error("presetId is required.");
+  }
+
+  const presets = restoreTargetPresets(config);
+  const index = presets.findIndex((item) => item.id === requestedPresetId);
+  if (index === -1) {
+    throw new Error("Restore target preset not found.");
+  }
+
+  const [removedPreset] = presets.splice(index, 1);
+  config.setup = {
+    ...config.setup,
+    restoreTargetPresets: presets,
+  };
+  await saveConfig(config);
+
+  return {
+    ok: true,
+    removedPreset,
+    operations: [`Deleted restore target preset ${removedPreset.name}.`],
+  };
+}
+
 function compactPreviewText(text, limit = 220) {
   const clean = String(text || "")
     .replace(/\s+/g, " ")
@@ -2918,6 +3087,35 @@ async function router(request, response) {
         const body = await readJsonBody(request);
         const result = await restoreBackupCatalogItem(innerConfig, {
           backupPath: String(body.backupPath || ""),
+        });
+        return jsonResponse(innerResponse, 200, result);
+      })(context);
+    }
+
+    if (pathname === "/api/history/restore-target-presets" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const presets = await listRestoreTargetPresets(innerConfig);
+        return jsonResponse(innerResponse, 200, { presets });
+      })(context);
+    }
+
+    if (pathname === "/api/history/restore-target-presets" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const result = await saveRestoreTargetPreset(innerConfig, {
+          presetId: String(body.presetId || ""),
+          name: String(body.name || ""),
+          targetPaths: Array.isArray(body.targetPaths) ? body.targetPaths : [],
+        });
+        return jsonResponse(innerResponse, 200, result);
+      })(context);
+    }
+
+    if (pathname === "/api/history/restore-target-presets" && request.method === "DELETE") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const result = await deleteRestoreTargetPreset(innerConfig, {
+          presetId: String(body.presetId || ""),
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);

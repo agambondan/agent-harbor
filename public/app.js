@@ -13,6 +13,8 @@ const state = {
   sessions: [],
   hideHomesWithoutAuth: false,
   restoreTargetPaths: [],
+  restoreTargetPresets: [],
+  restoreTargetPresetDraft: "",
   restoreTargetAccountFilter: "",
   restoreTargetQuery: "",
   restoreTargetsInitialized: false,
@@ -1421,6 +1423,193 @@ function renderRestoreTargets() {
   const selectedCount = state.restoreTargetPaths.length;
   const accountOptions = buildRestoreTargetAccountOptions();
 
+  const presetPanel = document.createElement("div");
+  presetPanel.className = "restore-filter-panel";
+  presetPanel.innerHTML = `
+    <div class="choice-toolbar">
+      <label class="filter-field">
+        <span>Save current target set as preset</span>
+        <input
+          data-target-preset="name"
+          type="text"
+          placeholder="example: all codex slots"
+          value="${escapeHtml(state.restoreTargetPresetDraft)}"
+        />
+      </label>
+      <div class="tag-row">
+        <button type="button" class="accent-button compact-button" data-target-preset="save">Save Preset</button>
+      </div>
+    </div>
+  `;
+  const presetNameInput = presetPanel.querySelector('[data-target-preset="name"]');
+  const presetSaveButton = presetPanel.querySelector('[data-target-preset="save"]');
+  const currentPresetMatch = () => {
+    const name = presetNameInput.value.trim();
+    if (!name) {
+      return null;
+    }
+    return (
+      state.restoreTargetPresets.find((preset) => preset.name.toLowerCase() === name.toLowerCase()) ||
+      null
+    );
+  };
+  const syncPresetSaveButton = () => {
+    presetSaveButton.textContent = currentPresetMatch() ? "Update Preset" : "Save Preset";
+  };
+  syncPresetSaveButton();
+  presetNameInput.addEventListener("input", () => {
+    state.restoreTargetPresetDraft = presetNameInput.value;
+    syncPresetSaveButton();
+  });
+  presetSaveButton.addEventListener("click", () =>
+    runTask(async () => {
+      const name = presetNameInput.value.trim();
+      const matchingPreset = currentPresetMatch();
+      if (!name) {
+        showToast("Preset name is required.", "warning");
+        return;
+      }
+      const targetPaths = getSelectedRestoreTargets();
+      if (!targetPaths.length) {
+        showToast("Select at least one target home first.", "warning");
+        return;
+      }
+
+      const savePreset = async () => {
+        const result = await request("/api/history/restore-target-presets", {
+          method: "POST",
+          body: JSON.stringify({
+            presetId: matchingPreset?.id || "",
+            name,
+            targetPaths,
+          }),
+        });
+        state.restoreTargetPresetDraft = result.preset.name;
+        showToast(
+          result.mode === "updated"
+            ? `Preset ${result.preset.name} updated.`
+            : `Preset ${result.preset.name} saved.`,
+          "success",
+        );
+        await refreshHomes();
+      };
+
+      if (matchingPreset) {
+        await confirmAction(
+          {
+            title: `Update preset ${matchingPreset.name}?`,
+            message:
+              "Harbor will overwrite the saved target set for this preset with the homes currently selected in Recovery.",
+            confirmText: "Update Preset",
+            details: [
+              `Preset: ${matchingPreset.name}`,
+              `Selected homes: ${targetPaths.length}`,
+            ],
+          },
+          savePreset,
+        );
+        return;
+      }
+
+      await savePreset();
+    }),
+  );
+  restoreTargetsList.append(presetPanel);
+
+  const savedPresetsPanel = document.createElement("div");
+  savedPresetsPanel.className = "stack compact-stack";
+  if (state.restoreTargetPresets.length === 0) {
+    savedPresetsPanel.innerHTML = `<p class="muted">No saved target presets yet.</p>`;
+  } else {
+    state.restoreTargetPresets.forEach((preset) => {
+      const resolvedLabels = preset.resolvedHomes
+        .slice(0, 3)
+        .map((home) => home.label)
+        .join(", ");
+      const extraResolved = preset.resolvedHomes.length > 3
+        ? ` +${preset.resolvedHomes.length - 3} more`
+        : "";
+      const card = document.createElement("article");
+      card.className = "home-card";
+      card.innerHTML = `
+        <div class="home-head">
+          <div>
+            <h4>${escapeHtml(preset.name)}</h4>
+            <p class="muted">${preset.resolvedCount}/${preset.targetCount} target${preset.targetCount === 1 ? "" : "s"} currently available${
+              preset.missingCount ? ` · ${preset.missingCount} missing` : ""
+            }</p>
+          </div>
+          <span class="chip">${preset.targetCount} saved</span>
+        </div>
+        <p class="path">${
+          resolvedLabels
+            ? `${escapeHtml(resolvedLabels)}${escapeHtml(extraResolved)}`
+            : "No current homes match this preset."
+        }</p>
+        ${
+          preset.missingTargetPaths.length
+            ? `<p class="muted">Missing paths: ${escapeHtml(preset.missingTargetPaths.join(", "))}</p>`
+            : ""
+        }
+        <div class="home-actions">
+          <button class="ghost-button" data-preset-action="apply" ${
+            preset.resolvedTargetPaths.length === 0 ? "disabled" : ""
+          }>Apply Preset</button>
+          <button class="warn-button" data-preset-action="delete">Delete Preset</button>
+        </div>
+      `;
+
+      card.querySelector('[data-preset-action="apply"]').addEventListener("click", () => {
+        state.restoreTargetPaths = [...preset.resolvedTargetPaths];
+        state.restoreTargetPresetDraft = preset.name;
+        renderRestoreTargets();
+        showToast(
+          preset.missingCount
+            ? `Applied ${preset.name}. ${preset.missingCount} saved path${preset.missingCount === 1 ? "" : "s"} are currently missing.`
+            : `Applied ${preset.name}.`,
+          preset.missingCount ? "warning" : "success",
+        );
+      });
+
+      card.querySelector('[data-preset-action="delete"]').addEventListener("click", () =>
+        runTask(() =>
+          confirmAction(
+            {
+              title: `Delete preset ${preset.name}?`,
+              message: "Harbor will remove this saved target set from the local config.",
+              confirmText: "Delete Preset",
+              tone: "warn",
+              details: [
+                `Saved targets: ${preset.targetCount}`,
+                preset.missingCount
+                  ? `Missing paths right now: ${preset.missingCount}`
+                  : "All saved paths still resolve to known homes.",
+              ],
+            },
+            async () => {
+              const result = await request("/api/history/restore-target-presets", {
+                method: "DELETE",
+                body: JSON.stringify({ presetId: preset.id }),
+              });
+              if (
+                state.restoreTargetPresetDraft.trim().toLowerCase() ===
+                preset.name.toLowerCase()
+              ) {
+                state.restoreTargetPresetDraft = "";
+              }
+              repairLog.textContent = result.operations.join("\n");
+              showToast(`${preset.name} deleted.`, "success");
+              await refreshHomes();
+            },
+          ),
+        ),
+      );
+
+      savedPresetsPanel.append(card);
+    });
+  }
+  restoreTargetsList.append(savedPresetsPanel);
+
   const filterPanel = document.createElement("div");
   filterPanel.className = "restore-filter-panel";
   filterPanel.innerHTML = `
@@ -1591,8 +1780,12 @@ async function refreshAccountSetup() {
 }
 
 async function refreshHomes() {
-  const data = await request("/api/homes");
-  state.homes = data.homes;
+  const [homesData, presetsData] = await Promise.all([
+    request("/api/homes"),
+    request("/api/history/restore-target-presets"),
+  ]);
+  state.homes = homesData.homes;
+  state.restoreTargetPresets = presetsData.presets || [];
   renderHomes();
   renderRestoreTargets();
   populateHomeSelectors();

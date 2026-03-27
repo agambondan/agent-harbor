@@ -38,6 +38,9 @@ Protected routes:
 - `POST /api/repair/home`
 - `POST /api/repair/all`
 - `POST /api/history/restore-shared`
+- `GET /api/history/restore-target-presets`
+- `POST /api/history/restore-target-presets`
+- `DELETE /api/history/restore-target-presets`
 
 If the admin user has not been created yet, protected routes return `403`.
 
@@ -719,6 +722,104 @@ Request body:
   "dryRun": false,
   "targetPaths": [
     "/home/you/.vscode-isolated/codex-1/codex-home"
+  ]
+}
+```
+
+## `GET /api/history/restore-target-presets`
+
+Lists saved Recovery target presets from Harbor config and resolves which saved paths still map to detected homes.
+
+Success response:
+
+```json
+{
+  "presets": [
+    {
+      "id": "9acffddc-a23f-4c2e-9044-4ee34e2f8d12",
+      "name": "all codex slots",
+      "targetCount": 4,
+      "resolvedCount": 4,
+      "missingCount": 0,
+      "resolvedTargetPaths": [
+        "/home/you/.vscode-isolated/codex-1/codex-home"
+      ],
+      "missingTargetPaths": [],
+      "resolvedHomes": [
+        {
+          "label": "codex-1",
+          "path": "/home/you/.vscode-isolated/codex-1/codex-home",
+          "accountEmail": "user@example.com"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## `POST /api/history/restore-target-presets`
+
+Creates a new saved Recovery target preset or updates an existing one.
+
+Request body:
+
+```json
+{
+  "presetId": "",
+  "name": "all codex slots",
+  "targetPaths": [
+    "/home/you/.vscode-isolated/codex-1/codex-home",
+    "/home/you/.vscode-isolated/codex-2/codex-home"
+  ]
+}
+```
+
+Behavior:
+
+- preset names are trimmed, normalized, and capped to 80 characters
+- when `presetId` matches an existing preset, that preset is updated
+- when `presetId` is omitted but `name` matches an existing preset case-insensitively, the preset is updated
+- only currently valid detected home paths are stored
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "mode": "created",
+  "preset": {
+    "id": "9acffddc-a23f-4c2e-9044-4ee34e2f8d12",
+    "name": "all codex slots",
+    "targetCount": 2,
+    "resolvedCount": 2,
+    "missingCount": 0
+  }
+}
+```
+
+## `DELETE /api/history/restore-target-presets`
+
+Deletes a saved Recovery target preset from Harbor config.
+
+Request body:
+
+```json
+{
+  "presetId": "9acffddc-a23f-4c2e-9044-4ee34e2f8d12"
+}
+```
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "removedPreset": {
+    "id": "9acffddc-a23f-4c2e-9044-4ee34e2f8d12",
+    "name": "all codex slots"
+  },
+  "operations": [
+    "Deleted restore target preset all codex slots."
   ]
 }
 ```
