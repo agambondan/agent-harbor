@@ -171,6 +171,13 @@ Harbor also catalogs the restore points it creates itself, including:
 
 Each item can be restored from the UI. If the current target already exists, Harbor moves it aside first as `*.pre-catalog-restore.<timestamp>` before applying the selected backup item.
 
+The catalog can also be narrowed directly in the UI:
+
+- filter by home label
+- filter by backup kind
+- search across title, paths, kind, and notes
+- sort by newest, oldest, size, title, or kind
+
 ### 7. Stale Slot Cleanup
 
 Harbor can also detect isolated `codex-*` homes that still contain local session history but never completed login, then archive them in one pass.

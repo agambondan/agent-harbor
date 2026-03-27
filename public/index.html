@@ -363,6 +363,40 @@
               Harbor only catalogs its own restore points: session index snapshots, state DB reset
               backups, archived isolated slots, auth restore points, and launcher backups.
             </p>
+            <div class="restore-filter-panel">
+              <div class="choice-toolbar">
+                <label class="filter-field">
+                  <span>Home Filter</span>
+                  <select id="backups-home-filter">
+                    <option value="">All homes</option>
+                  </select>
+                </label>
+                <label class="filter-field">
+                  <span>Kind Filter</span>
+                  <select id="backups-kind-filter">
+                    <option value="">All kinds</option>
+                  </select>
+                </label>
+                <label class="filter-field">
+                  <span>Sort</span>
+                  <select id="backups-sort">
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="largest">Largest first</option>
+                    <option value="title">Title A–Z</option>
+                    <option value="kind">Kind A–Z</option>
+                  </select>
+                </label>
+              </div>
+              <label class="filter-field">
+                <span>Search Restore Points</span>
+                <input
+                  id="backups-query"
+                  type="search"
+                  placeholder="title, path, notes, or kind"
+                />
+              </label>
+            </div>
             <div id="backups-summary" class="stack compact-stack"></div>
             <div id="backups-log" class="log-box"></div>
             <div id="backups-list" class="stack"></div>

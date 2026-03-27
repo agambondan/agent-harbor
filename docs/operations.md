@@ -143,9 +143,10 @@ Use the `Backup Catalog` panel when you want to inspect or restore Harbor-manage
 
 1. open the `Backup Catalog` panel
 2. click `Refresh Backups`
-3. inspect the newest restore points first
-4. click `Restore This Backup` on the item you want
-5. confirm the restore action
+3. use `Home Filter`, `Kind Filter`, `Search Restore Points`, or `Sort` if the list is crowded
+4. inspect the matching restore points
+5. click `Restore This Backup` on the item you want
+6. confirm the restore action
 
 Restore rules:
 

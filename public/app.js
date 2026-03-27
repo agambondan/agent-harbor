@@ -5,6 +5,10 @@ const state = {
   homes: [],
   healthReport: null,
   backupCatalog: null,
+  backupCatalogHomeFilter: "",
+  backupCatalogKindFilter: "",
+  backupCatalogQuery: "",
+  backupCatalogSort: "newest",
   cleanupPlan: null,
   sessions: [],
   hideHomesWithoutAuth: false,
@@ -31,6 +35,10 @@ const repairLog = document.querySelector("#repair-log");
 const backupsSummary = document.querySelector("#backups-summary");
 const backupsList = document.querySelector("#backups-list");
 const backupsLog = document.querySelector("#backups-log");
+const backupsHomeFilter = document.querySelector("#backups-home-filter");
+const backupsKindFilter = document.querySelector("#backups-kind-filter");
+const backupsQuery = document.querySelector("#backups-query");
+const backupsSort = document.querySelector("#backups-sort");
 const cleanupSummary = document.querySelector("#cleanup-summary");
 const cleanupList = document.querySelector("#cleanup-list");
 const cleanupLog = document.querySelector("#cleanup-log");
@@ -386,6 +394,70 @@ function formatBytes(bytes) {
   const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
   const scaled = value / 1024 ** exponent;
   return `${scaled >= 10 || exponent === 0 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[exponent]}`;
+}
+
+function populateFilterSelect(select, options, allLabel, selectedValue = "") {
+  if (!select) {
+    return "";
+  }
+
+  select.innerHTML = `<option value="">${escapeHtml(allLabel)}</option>`;
+  options.forEach((optionValue) => {
+    const option = document.createElement("option");
+    option.value = optionValue;
+    option.textContent = optionValue;
+    select.append(option);
+  });
+
+  if (selectedValue && options.includes(selectedValue)) {
+    select.value = selectedValue;
+    return selectedValue;
+  }
+
+  select.value = "";
+  return "";
+}
+
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, { sensitivity: "base" });
+}
+
+function compareModifiedAt(left, right) {
+  return String(left?.modifiedAt || "").localeCompare(String(right?.modifiedAt || ""));
+}
+
+function sortBackupItems(items, sortMode) {
+  const sorted = [...items];
+  sorted.sort((left, right) => {
+    if (sortMode === "oldest") {
+      return compareModifiedAt(left, right) || compareText(left.title, right.title);
+    }
+    if (sortMode === "largest") {
+      return Number(right.sizeBytes || 0) - Number(left.sizeBytes || 0) || compareModifiedAt(right, left);
+    }
+    if (sortMode === "title") {
+      return compareText(left.title, right.title) || compareModifiedAt(right, left);
+    }
+    if (sortMode === "kind") {
+      return compareText(left.kind, right.kind) || compareModifiedAt(right, left);
+    }
+    return compareModifiedAt(right, left) || compareText(left.title, right.title);
+  });
+  return sorted;
+}
+
+function backupSearchText(item) {
+  return [
+    item.title,
+    item.homeLabel || "global",
+    item.kind,
+    item.backupPath,
+    item.targetPath,
+    ...(item.notes || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 function appendAccountSetupLog(payload) {
@@ -823,6 +895,55 @@ function renderBackups() {
   }
 
   const { summary, generatedAt, items } = state.backupCatalog;
+  const homeOptions = [...new Set(items.map((item) => item.homeLabel || "global"))].sort(compareText);
+  const kindOptions = [...new Set(items.map((item) => item.kind).filter(Boolean))].sort(compareText);
+  state.backupCatalogHomeFilter = populateFilterSelect(
+    backupsHomeFilter,
+    homeOptions,
+    "All homes",
+    state.backupCatalogHomeFilter,
+  );
+  state.backupCatalogKindFilter = populateFilterSelect(
+    backupsKindFilter,
+    kindOptions,
+    "All kinds",
+    state.backupCatalogKindFilter,
+  );
+  if (backupsQuery) {
+    backupsQuery.value = state.backupCatalogQuery;
+  }
+  if (backupsSort) {
+    backupsSort.value = state.backupCatalogSort;
+  }
+
+  const normalizedQuery = state.backupCatalogQuery.trim().toLowerCase();
+  const filteredItems = sortBackupItems(
+    items.filter((item) => {
+      if (state.backupCatalogHomeFilter && (item.homeLabel || "global") !== state.backupCatalogHomeFilter) {
+        return false;
+      }
+      if (state.backupCatalogKindFilter && item.kind !== state.backupCatalogKindFilter) {
+        return false;
+      }
+      if (normalizedQuery && !backupSearchText(item).includes(normalizedQuery)) {
+        return false;
+      }
+      return true;
+    }),
+    state.backupCatalogSort,
+  );
+
+  const activeFilterBits = [];
+  if (state.backupCatalogHomeFilter) {
+    activeFilterBits.push(`home: ${state.backupCatalogHomeFilter}`);
+  }
+  if (state.backupCatalogKindFilter) {
+    activeFilterBits.push(`kind: ${state.backupCatalogKindFilter}`);
+  }
+  if (normalizedQuery) {
+    activeFilterBits.push(`search: “${state.backupCatalogQuery.trim()}”`);
+  }
+
   backupsSummary.innerHTML = `
     <div class="health-summary-grid">
       <article class="health-summary-card">
@@ -838,7 +959,12 @@ function renderBackups() {
         <span>Archived slots</span>
       </article>
     </div>
-    <p class="muted">Generated at ${generatedAt}</p>
+    <p class="muted">${filteredItems.length}/${items.length} visible restore point${items.length === 1 ? "" : "s"} · Generated at ${generatedAt}</p>
+    ${
+      activeFilterBits.length > 0
+        ? `<p class="muted">Active filters: ${escapeHtml(activeFilterBits.join(" · "))}</p>`
+        : ""
+    }
   `;
 
   if (!items.length) {
@@ -846,7 +972,12 @@ function renderBackups() {
     return;
   }
 
-  items.forEach((item) => {
+  if (!filteredItems.length) {
+    backupsList.innerHTML = `<p class="muted">No backup items matched the current filters.</p>`;
+    return;
+  }
+
+  filteredItems.forEach((item) => {
     const card = document.createElement("article");
     card.className = "home-card";
     const notesMarkup =
@@ -1671,6 +1802,22 @@ document.querySelector("#refresh-health-button").addEventListener("click", () =>
 document.querySelector("#refresh-backups-button").addEventListener("click", () => runTask(refreshBackups));
 document.querySelector("#refresh-cleanup-button").addEventListener("click", () => runTask(refreshCleanupPlan));
 document.querySelector("#refresh-homes-button").addEventListener("click", () => runTask(refreshHomes));
+backupsHomeFilter.addEventListener("change", () => {
+  state.backupCatalogHomeFilter = backupsHomeFilter.value;
+  renderBackups();
+});
+backupsKindFilter.addEventListener("change", () => {
+  state.backupCatalogKindFilter = backupsKindFilter.value;
+  renderBackups();
+});
+backupsQuery.addEventListener("input", () => {
+  state.backupCatalogQuery = backupsQuery.value;
+  renderBackups();
+});
+backupsSort.addEventListener("change", () => {
+  state.backupCatalogSort = backupsSort.value;
+  renderBackups();
+});
 document.querySelector("#refresh-sessions-button").addEventListener("click", () =>
   runTask(refreshSessions),
 );
