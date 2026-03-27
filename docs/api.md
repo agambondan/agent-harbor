@@ -26,7 +26,9 @@ Protected routes:
 - `POST /api/extensions/sync`
 - `GET /api/health`
 - `GET /api/homes`
+- `GET /api/backups`
 - `POST /api/homes/archive`
+- `POST /api/backups/restore`
 - `GET /api/sessions`
 - `GET /api/sessions/preview`
 - `POST /api/sessions/import`
@@ -546,6 +548,83 @@ Success response:
   "archiveRoot": "/home/you/.vscode-isolated-archive",
   "operations": [
     "Archived /home/you/.vscode-isolated/codex-4 to /home/you/.vscode-isolated-archive/codex-4.20260326-204700."
+  ]
+}
+```
+
+## `GET /api/backups`
+
+Builds a catalog of Harbor-managed restore points under the configured homes and isolated archive root.
+
+Included categories:
+
+- `sessions.bak.*`, `archived_sessions.bak.*`, `session_index.jsonl.bak.*`
+- `session_index.jsonl.pre-shared-restore.*.bak`
+- `session_index.jsonl.pre-shared-merge.*.bak`
+- `auth.json.pre-restore-*`
+- `state.vscdb.pre-openai-reset.*`
+- archived `codex-*` slots under `roots.isolatedProfilesRoot + "-archive"`
+- launcher backups like `code-codex-1.bak.*`
+
+Success response:
+
+```json
+{
+  "generatedAt": "2026-03-27T06:52:52.485Z",
+  "summary": {
+    "total": 14,
+    "slotArchives": 1,
+    "files": 13
+  },
+  "items": [
+    {
+      "id": "/home/you/.codex/session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak",
+      "kind": "session-index-merge-backup",
+      "title": "Session index pre shared-merge snapshot",
+      "homeLabel": "main",
+      "backupPath": "/home/you/.codex/session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak",
+      "backupName": "session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak",
+      "targetPath": "/home/you/.codex/session_index.jsonl",
+      "targetExists": true,
+      "modifiedAt": "2026-03-26T13:15:21.228Z",
+      "sizeBytes": 84291,
+      "isDirectory": false,
+      "notes": [
+        "Created before shared-era history merge imported legacy threads."
+      ]
+    }
+  ]
+}
+```
+
+## `POST /api/backups/restore`
+
+Restores one item from the backup catalog back into its original target path.
+
+Request body:
+
+```json
+{
+  "backupPath": "/home/you/.codex/session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak"
+}
+```
+
+Behavior:
+
+- Harbor rescans the current backup catalog and only restores items that still exist there
+- if the current target path exists, Harbor moves it aside first as `*.pre-catalog-restore.<timestamp>`
+- file and directory restore points are copied back into their original target path
+- archived `codex-*` slots are copied back into `roots.isolatedProfilesRoot/<slot>`
+- matching archived launcher files are also restored when present
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "operations": [
+    "Backed up current target to /home/you/.codex/session_index.jsonl.pre-catalog-restore.20260327-065912.",
+    "Restored /home/you/.codex/session_index.jsonl from /home/you/.codex/session_index.jsonl.pre-shared-merge.2026-03-26T13-15-21-228Z.bak."
   ]
 }
 ```

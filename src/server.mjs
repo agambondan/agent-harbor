@@ -1790,6 +1790,283 @@ async function latestBackup(homePath, entryName) {
   return matches.length > 0 ? path.join(homePath, matches[matches.length - 1]) : null;
 }
 
+async function safeReadDir(dirPath) {
+  try {
+    return await fs.readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+async function createBackupCatalogItem(items, seen, input) {
+  const backupPath = normalizePath(input.backupPath);
+  if (!backupPath || seen.has(backupPath) || !(await pathExists(backupPath))) {
+    return;
+  }
+
+  const stat = await fs.stat(backupPath);
+  seen.add(backupPath);
+  items.push({
+    id: backupPath,
+    kind: input.kind,
+    title: input.title,
+    homeLabel: input.homeLabel || null,
+    backupPath,
+    backupName: path.basename(backupPath),
+    targetPath: input.targetPath ? normalizePath(input.targetPath) : null,
+    targetExists: input.targetPath ? await pathExists(input.targetPath) : false,
+    modifiedAt: stat.mtime.toISOString(),
+    sizeBytes: stat.isDirectory() ? null : stat.size,
+    isDirectory: stat.isDirectory(),
+    notes: Array.isArray(input.notes) ? input.notes : [],
+    slotKey: input.slotKey || null,
+    archiveTag: input.archiveTag || null,
+    archivedLaunchers: Array.isArray(input.archivedLaunchers)
+      ? input.archivedLaunchers.map((launcherPath) => normalizePath(launcherPath))
+      : [],
+  });
+}
+
+async function collectHomeBackupCatalog(items, seen, home, config) {
+  const homeEntries = await safeReadDir(home.path);
+  const homeMatchers = [
+    {
+      prefix: "sessions.bak.",
+      kind: "sessions-backup",
+      title: "Sessions directory backup",
+      targetPath: path.join(home.path, "sessions"),
+    },
+    {
+      prefix: "archived_sessions.bak.",
+      kind: "archived-sessions-backup",
+      title: "Archived sessions backup",
+      targetPath: path.join(home.path, "archived_sessions"),
+    },
+    {
+      prefix: "session_index.jsonl.bak.",
+      kind: "session-index-backup",
+      title: "Session index backup",
+      targetPath: path.join(home.path, "session_index.jsonl"),
+    },
+    {
+      prefix: "session_index.jsonl.pre-shared-restore.",
+      kind: "session-index-restore-point",
+      title: "Session index pre shared-restore snapshot",
+      targetPath: path.join(home.path, "session_index.jsonl"),
+      notes: ["Created before shared-era history restore appended new rows."],
+    },
+    {
+      prefix: "session_index.jsonl.pre-shared-merge.",
+      kind: "session-index-merge-backup",
+      title: "Session index pre shared-merge snapshot",
+      targetPath: path.join(home.path, "session_index.jsonl"),
+      notes: ["Created before shared-era history merge imported legacy threads."],
+    },
+    {
+      prefix: "auth.json.pre-restore-",
+      kind: "auth-restore-point",
+      title: "Auth restore point",
+      targetPath: path.join(home.path, "auth.json"),
+      notes: ["Contains backed-up auth identity from an earlier restore workflow."],
+    },
+  ];
+
+  for (const matcher of homeMatchers) {
+    for (const entry of homeEntries) {
+      if (!entry.name.startsWith(matcher.prefix)) {
+        continue;
+      }
+      await createBackupCatalogItem(items, seen, {
+        ...matcher,
+        homeLabel: home.label,
+        backupPath: path.join(home.path, entry.name),
+      });
+    }
+  }
+
+  const stateDbPath = stateDbForHome(home, config);
+  const stateDbDir = path.dirname(stateDbPath);
+  const stateDbEntries = await safeReadDir(stateDbDir);
+  for (const entry of stateDbEntries) {
+    if (!entry.name.startsWith("state.vscdb.pre-openai-reset.")) {
+      continue;
+    }
+    await createBackupCatalogItem(items, seen, {
+      kind: "state-db-restore-point",
+      title: "VS Code openai.chatgpt state reset backup",
+      homeLabel: home.label,
+      backupPath: path.join(stateDbDir, entry.name),
+      targetPath: stateDbPath,
+      notes: ["Created before Harbor removed the openai.chatgpt row from state.vscdb."],
+    });
+  }
+}
+
+async function collectLauncherBackupCatalog(items, seen, config) {
+  const launcherBinDir = normalizePath(config.roots.launcherBinDir);
+  const entries = await safeReadDir(launcherBinDir);
+  for (const entry of entries) {
+    if (!entry.name.includes(".bak.")) {
+      continue;
+    }
+    const backupPath = path.join(launcherBinDir, entry.name);
+    const targetName = entry.name.split(".bak.")[0];
+    if (!targetName || (!targetName.startsWith("code-codex-") && !/^codex-\d+$/.test(targetName))) {
+      continue;
+    }
+    await createBackupCatalogItem(items, seen, {
+      kind: "launcher-backup",
+      title: "Launcher backup",
+      homeLabel: targetName.replace(/^code-/, ""),
+      backupPath,
+      targetPath: path.join(launcherBinDir, targetName),
+      notes: ["Created when Harbor regenerated launcher wrappers."],
+    });
+  }
+}
+
+async function collectArchivedSlotCatalog(items, seen, config) {
+  const archiveRoot = isolatedArchiveRoot(config);
+  const archiveEntries = await safeReadDir(archiveRoot);
+  const archiveBinDir = path.join(archiveRoot, "bin");
+  const archiveBinEntries = await safeReadDir(archiveBinDir);
+
+  for (const entry of archiveEntries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const match = entry.name.match(/^(codex-\d+)\.(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const [, slotKey, archiveTag] = match;
+    const archivedLaunchers = archiveBinEntries
+      .filter(
+        (launcher) =>
+          launcher.isFile() &&
+          (launcher.name === `${slotKey}.${archiveTag}` ||
+            launcher.name === `code-${slotKey}.${archiveTag}`),
+      )
+      .map((launcher) => path.join(archiveBinDir, launcher.name));
+
+    await createBackupCatalogItem(items, seen, {
+      kind: "slot-archive",
+      title: "Archived isolated slot",
+      homeLabel: slotKey,
+      backupPath: path.join(archiveRoot, entry.name),
+      targetPath: path.join(normalizePath(config.roots.isolatedProfilesRoot), slotKey),
+      slotKey,
+      archiveTag,
+      archivedLaunchers,
+      notes: [
+        "Restoring copies this archived slot back into the isolated profiles root.",
+        archivedLaunchers.length > 0
+          ? `Also restores ${archivedLaunchers.length} archived launcher file${archivedLaunchers.length === 1 ? "" : "s"}.`
+          : "No archived launcher wrappers were found for this slot archive.",
+      ],
+    });
+  }
+}
+
+async function listBackupCatalog(config) {
+  const homes = await discoverHomes(config);
+  const items = [];
+  const seen = new Set();
+
+  for (const home of homes) {
+    await collectHomeBackupCatalog(items, seen, home, config);
+  }
+  await collectLauncherBackupCatalog(items, seen, config);
+  await collectArchivedSlotCatalog(items, seen, config);
+
+  items.sort((left, right) => String(right.modifiedAt).localeCompare(String(left.modifiedAt)));
+  const summary = {
+    total: items.length,
+    slotArchives: items.filter((item) => item.kind === "slot-archive").length,
+    files: items.filter((item) => item.kind !== "slot-archive").length,
+  };
+
+  return {
+    generatedAt: nowIso(),
+    summary,
+    items,
+  };
+}
+
+async function moveCurrentTargetAside(targetPath, tag, operations, archiveRootOverride = "") {
+  if (!(await pathExists(targetPath))) {
+    return null;
+  }
+
+  const parkedPath = archiveRootOverride
+    ? path.join(archiveRootOverride, `${path.basename(targetPath)}.pre-catalog-restore.${tag}`)
+    : `${targetPath}.pre-catalog-restore.${tag}`;
+  await fs.mkdir(path.dirname(parkedPath), { recursive: true });
+  await fs.rename(targetPath, parkedPath);
+  operations.push(`Backed up current target to ${parkedPath}.`);
+  return parkedPath;
+}
+
+async function restoreGenericBackupItem(item) {
+  const operations = [];
+  const tag = timestampTag();
+  if (!item.targetPath) {
+    throw new Error("This backup item does not have a restorable target path.");
+  }
+
+  await moveCurrentTargetAside(item.targetPath, tag, operations);
+  await copyEntry(item.backupPath, item.targetPath);
+  operations.push(`Restored ${item.targetPath} from ${item.backupPath}.`);
+
+  return {
+    ok: true,
+    restored: item,
+    operations,
+  };
+}
+
+async function restoreArchivedSlotItem(config, item) {
+  const operations = [];
+  const tag = timestampTag();
+  const archiveRoot = isolatedArchiveRoot(config);
+  const launcherBinDir = normalizePath(config.roots.launcherBinDir);
+
+  await moveCurrentTargetAside(item.targetPath, tag, operations, archiveRoot);
+  await copyEntry(item.backupPath, item.targetPath);
+  operations.push(`Restored isolated slot ${item.slotKey} from ${item.backupPath}.`);
+
+  for (const archivedLauncher of item.archivedLaunchers || []) {
+    const targetName =
+      item.archiveTag && path.basename(archivedLauncher).endsWith(`.${item.archiveTag}`)
+        ? path.basename(archivedLauncher).slice(0, -(item.archiveTag.length + 1))
+        : path.basename(archivedLauncher);
+    const targetLauncherPath = path.join(launcherBinDir, targetName);
+    await moveCurrentTargetAside(targetLauncherPath, tag, operations);
+    await copyEntry(archivedLauncher, targetLauncherPath);
+    operations.push(`Restored launcher ${targetLauncherPath} from archive.`);
+  }
+
+  return {
+    ok: true,
+    restored: item,
+    operations,
+  };
+}
+
+async function restoreBackupCatalogItem(config, { backupPath }) {
+  const normalizedBackupPath = normalizePath(backupPath);
+  const catalog = await listBackupCatalog(config);
+  const item = catalog.items.find((entry) => entry.backupPath === normalizedBackupPath);
+  if (!item) {
+    throw new Error(`Backup item not found in catalog: ${normalizedBackupPath}`);
+  }
+
+  if (item.kind === "slot-archive") {
+    return restoreArchivedSlotItem(config, item);
+  }
+  return restoreGenericBackupItem(item);
+}
+
 async function detachSharedForHome(config, home, { resetOpenAIState = true } = {}) {
   const sharedRoot = normalizePath(config.roots.sharedSessionsRoot);
   const actions = [];
@@ -2480,6 +2757,13 @@ async function router(request, response) {
       })(context);
     }
 
+    if (pathname === "/api/backups" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const catalog = await listBackupCatalog(innerConfig);
+        return jsonResponse(innerResponse, 200, catalog);
+      })(context);
+    }
+
     if (pathname === "/api/health" && request.method === "GET") {
       return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
         const report = await inspectSystemHealth(innerConfig);
@@ -2492,6 +2776,16 @@ async function router(request, response) {
         const body = await readJsonBody(request);
         const result = await archiveNoAuthHome(innerConfig, {
           homePath: String(body.homePath || ""),
+        });
+        return jsonResponse(innerResponse, 200, result);
+      })(context);
+    }
+
+    if (pathname === "/api/backups/restore" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const result = await restoreBackupCatalogItem(innerConfig, {
+          backupPath: String(body.backupPath || ""),
         });
         return jsonResponse(innerResponse, 200, result);
       })(context);

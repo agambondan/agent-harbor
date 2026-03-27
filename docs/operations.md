@@ -137,6 +137,23 @@ Use this when a `codex-*` isolated slot was created, has local session data, but
 
 If you only want the UI cleaner temporarily, use `Hide No-Auth` in the Homes panel instead of archiving.
 
+### Browse Restore Points
+
+Use the `Backup Catalog` panel when you want to inspect or restore Harbor-managed restore points.
+
+1. open the `Backup Catalog` panel
+2. click `Refresh Backups`
+3. inspect the newest restore points first
+4. click `Restore This Backup` on the item you want
+5. confirm the restore action
+
+Restore rules:
+
+1. Harbor backs up the current target first as `*.pre-catalog-restore.<timestamp>` when it exists
+2. file and directory backups are copied back into place
+3. archived isolated `codex-*` slots are copied back from `~/.vscode-isolated-archive/...`
+4. archived launcher wrappers are restored together with a slot archive when present
+
 ### Restore Shared-Era History
 
 Use this when you want to pull the old chat history back from the parked shared sessions root that used to be symlinked across profiles.

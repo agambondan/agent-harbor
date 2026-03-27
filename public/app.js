@@ -4,6 +4,7 @@ const state = {
   accountSetup: null,
   homes: [],
   healthReport: null,
+  backupCatalog: null,
   sessions: [],
   hideHomesWithoutAuth: false,
   restoreTargetPaths: [],
@@ -25,6 +26,9 @@ const healthList = document.querySelector("#health-list");
 const homesList = document.querySelector("#homes-list");
 const toggleNoAuthHomesButton = document.querySelector("#toggle-no-auth-homes-button");
 const repairLog = document.querySelector("#repair-log");
+const backupsSummary = document.querySelector("#backups-summary");
+const backupsList = document.querySelector("#backups-list");
+const backupsLog = document.querySelector("#backups-log");
 const restoreTargetsList = document.querySelector("#restore-targets-list");
 const sessionsList = document.querySelector("#sessions-list");
 const targetHomeSelect = document.querySelector("#target-home-select");
@@ -365,6 +369,17 @@ function healthStatusLabel(status) {
   if (status === "ok") return "Healthy";
   if (status === "critical") return "Critical";
   return "Warning";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+  const scaled = value / 1024 ** exponent;
+  return `${scaled >= 10 || exponent === 0 ? scaled.toFixed(0) : scaled.toFixed(1)} ${units[exponent]}`;
 }
 
 function appendAccountSetupLog(payload) {
@@ -789,6 +804,100 @@ function renderHealth() {
       </div>
     `;
     healthList.append(card);
+  });
+}
+
+function renderBackups() {
+  backupsSummary.innerHTML = "";
+  backupsList.innerHTML = "";
+
+  if (!state.backupCatalog) {
+    backupsSummary.innerHTML = `<p class="muted">No backup catalog loaded yet.</p>`;
+    return;
+  }
+
+  const { summary, generatedAt, items } = state.backupCatalog;
+  backupsSummary.innerHTML = `
+    <div class="health-summary-grid">
+      <article class="health-summary-card">
+        <strong>${summary.total}</strong>
+        <span>Total restore points</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.files}</strong>
+        <span>File / dir backups</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.slotArchives}</strong>
+        <span>Archived slots</span>
+      </article>
+    </div>
+    <p class="muted">Generated at ${generatedAt}</p>
+  `;
+
+  if (!items.length) {
+    backupsList.innerHTML = `<p class="muted">No Harbor-managed backup items were found under the configured roots.</p>`;
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "home-card";
+    const notesMarkup =
+      item.notes?.length > 0
+        ? `<ul class="health-listing">${item.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>`
+        : `<p class="muted">No extra notes.</p>`;
+
+    card.innerHTML = `
+      <div class="home-head">
+        <div>
+          <h4>${escapeHtml(item.title)}</h4>
+          <p class="muted">${escapeHtml(item.homeLabel || "global")} · ${escapeHtml(item.kind)} · ${escapeHtml(item.modifiedAt)}</p>
+        </div>
+        <span class="chip">${item.isDirectory ? "directory" : formatBytes(item.sizeBytes)}</span>
+      </div>
+      <p class="path">Backup: ${escapeHtml(item.backupPath)}</p>
+      ${item.targetPath ? `<p class="path">Target: ${escapeHtml(item.targetPath)}</p>` : ""}
+      <p class="muted">${item.targetExists ? "Current target exists and will be backed up before restore." : "Current target does not exist yet; restore will recreate it."}</p>
+      ${notesMarkup}
+      <div class="home-actions">
+        <button class="accent-button" data-action="restore">Restore This Backup</button>
+      </div>
+    `;
+
+    card.querySelector('[data-action="restore"]').addEventListener("click", () =>
+      runTask(() =>
+        confirmAction(
+          {
+            title: `Restore ${item.title}?`,
+            message:
+              "Harbor will back up the current target first, then restore this backup item into its original path.",
+            confirmText: "Restore Backup",
+            tone: "warn",
+            details: [
+              `Backup: ${item.backupPath}`,
+              item.targetPath ? `Target: ${item.targetPath}` : "Target path unavailable",
+              item.targetExists
+                ? "Current target exists: yes (Harbor will move it aside first)"
+                : "Current target exists: no",
+              ...(item.notes || []),
+            ],
+          },
+          async () => {
+            const result = await request("/api/backups/restore", {
+              method: "POST",
+              body: JSON.stringify({ backupPath: item.backupPath }),
+            });
+            backupsLog.textContent = result.operations.join("\n");
+            showToast(`${item.title} restored.`, "success");
+            await refreshHomes();
+            await refreshSessions();
+          },
+        ),
+      ),
+    );
+
+    backupsList.append(card);
   });
 }
 
@@ -1245,11 +1354,17 @@ async function refreshHomes() {
   renderRestoreTargets();
   populateHomeSelectors();
   await refreshHealth();
+  await refreshBackups();
 }
 
 async function refreshHealth() {
   state.healthReport = await request("/api/health");
   renderHealth();
+}
+
+async function refreshBackups() {
+  state.backupCatalog = await request("/api/backups");
+  renderBackups();
 }
 
 async function refreshSessions() {
@@ -1435,6 +1550,7 @@ toggleNoAuthHomesButton.addEventListener("click", () => {
   renderHomes();
 });
 document.querySelector("#refresh-health-button").addEventListener("click", () => runTask(refreshHealth));
+document.querySelector("#refresh-backups-button").addEventListener("click", () => runTask(refreshBackups));
 document.querySelector("#refresh-homes-button").addEventListener("click", () => runTask(refreshHomes));
 document.querySelector("#refresh-sessions-button").addEventListener("click", () =>
   runTask(refreshSessions),

@@ -16,6 +16,7 @@ The project provides a small browser UI and a local backend so you can:
 - restore old symlink-era history from the parked shared sessions root back into local homes
 - preview shared-era restore counts, filter targets by account, and choose exactly which homes should receive that history
 - archive isolated `codex-*` slots that never got an `auth.json`, without deleting their session history
+- browse Harbor-managed restore points and restore individual backup items from the web UI
 - run a health check dashboard that flags auth gaps, shared-session leaks, launcher drift, empty extension dirs, and invalid custom launch targets
 - customize where the app should look for Codex homes, shared storage, and VS Code state files
 
@@ -156,6 +157,18 @@ If several profiles were previously wired to a shared session root, the repair f
 - restore local copies from `.bak*` snapshots when present
 - otherwise restore from the current shared target
 - optionally clear the VS Code `openai.chatgpt` state entry from `state.vscdb`
+
+### 6. Backup Catalog
+
+Harbor also catalogs the restore points it creates itself, including:
+
+- `session_index.jsonl` snapshots created before shared merge / shared restore actions
+- `state.vscdb.pre-openai-reset.*`
+- archived isolated `codex-*` slot folders
+- launcher backups
+- `auth.json.pre-restore-*`
+
+Each item can be restored from the UI. If the current target already exists, Harbor moves it aside first as `*.pre-catalog-restore.<timestamp>` before applying the selected backup item.
 
 ## Safety Model
 
