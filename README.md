@@ -16,6 +16,7 @@ The project provides a small browser UI and a local backend so you can:
 - restore old symlink-era history from the parked shared sessions root back into local homes
 - preview shared-era restore counts, filter targets by account, and choose exactly which homes should receive that history
 - archive isolated `codex-*` slots that never got an `auth.json`, without deleting their session history
+- run a health check dashboard that flags auth gaps, shared-session leaks, launcher drift, empty extension dirs, and invalid custom launch targets
 - customize where the app should look for Codex homes, shared storage, and VS Code state files
 
 ## Why This Exists

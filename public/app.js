@@ -3,6 +3,7 @@ const state = {
   config: null,
   accountSetup: null,
   homes: [],
+  healthReport: null,
   sessions: [],
   hideHomesWithoutAuth: false,
   restoreTargetPaths: [],
@@ -19,6 +20,8 @@ const configForm = document.querySelector("#config-form");
 const accountGuide = document.querySelector("#account-guide");
 const accountSlotsList = document.querySelector("#account-slots-list");
 const accountSetupLog = document.querySelector("#account-setup-log");
+const healthSummary = document.querySelector("#health-summary");
+const healthList = document.querySelector("#health-list");
 const homesList = document.querySelector("#homes-list");
 const toggleNoAuthHomesButton = document.querySelector("#toggle-no-auth-homes-button");
 const repairLog = document.querySelector("#repair-log");
@@ -348,6 +351,18 @@ function statusChipTone(status) {
   if (status === "connected") return "success";
   if (status === "awaiting_login") return "warning";
   return "subtle";
+}
+
+function healthChipTone(status) {
+  if (status === "ok") return "success";
+  if (status === "critical") return "critical";
+  return "warning";
+}
+
+function healthStatusLabel(status) {
+  if (status === "ok") return "Healthy";
+  if (status === "critical") return "Critical";
+  return "Warning";
 }
 
 function appendAccountSetupLog(payload) {
@@ -680,6 +695,98 @@ function renderHomes() {
     }
 
     homesList.append(card);
+  });
+}
+
+function renderHealth() {
+  healthSummary.innerHTML = "";
+  healthList.innerHTML = "";
+
+  if (!state.healthReport) {
+    healthSummary.innerHTML = `<p class="muted">No health data loaded yet.</p>`;
+    return;
+  }
+
+  const { summary, generatedAt, checks } = state.healthReport;
+  healthSummary.innerHTML = `
+    <div class="health-summary-grid">
+      <article class="health-summary-card">
+        <strong>${summary.total}</strong>
+        <span>Total Homes</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.ok}</strong>
+        <span>Healthy</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.warning}</strong>
+        <span>Warnings</span>
+      </article>
+      <article class="health-summary-card">
+        <strong>${summary.critical}</strong>
+        <span>Critical</span>
+      </article>
+    </div>
+    <p class="muted">Generated at ${generatedAt}</p>
+  `;
+
+  if (!checks.length) {
+    healthList.innerHTML = `<p class="muted">No homes available for health inspection.</p>`;
+    return;
+  }
+
+  checks.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "home-card";
+    const issuesMarkup =
+      item.issues.length > 0
+        ? item.issues
+            .map(
+              (issue) =>
+                `<li><span class="chip ${healthChipTone(issue.severity)}">${issue.severity}</span> ${escapeHtml(issue.message)}</li>`,
+            )
+            .join("")
+        : `<li><span class="chip success">ok</span> No actionable issues detected.</li>`;
+    const recommendationsMarkup =
+      item.recommendations.length > 0
+        ? item.recommendations.map((line) => `<li>${escapeHtml(line)}</li>`).join("")
+        : `<li>No action needed.</li>`;
+
+    card.innerHTML = `
+      <div class="home-head">
+        <div>
+          <h4>${escapeHtml(item.label)}</h4>
+          <p class="muted">${escapeHtml(item.accountEmail || "No auth.json")} · ${item.sessionCount} threads</p>
+        </div>
+        <span class="chip ${healthChipTone(item.status)}">${healthStatusLabel(item.status)}</span>
+      </div>
+      <p class="path">${escapeHtml(item.path)}</p>
+      <div class="health-check-grid">
+        <p class="path">Extensions: ${escapeHtml(item.checks.extensions.path)} · ${item.checks.extensions.count} folder</p>
+        <p class="path">State DB: ${escapeHtml(item.checks.stateDb.path)} · ${item.checks.stateDb.exists ? "present" : "missing"}</p>
+        ${
+          item.checks.launcher
+            ? `<p class="path">Launcher: ${
+                item.checks.launcher.wrapperExists && item.checks.launcher.aliasExists ? "installed" : "missing"
+              } · ${item.checks.launcher.wrapperSynced && item.checks.launcher.aliasSynced ? "synced" : "needs reinstall"}</p>`
+            : `<p class="path">Launcher: n/a</p>`
+        }
+        ${
+          item.checks.launchSettings
+            ? `<p class="path">Launch Target: ${item.checks.launchSettings.launchMode === "custom" ? escapeHtml(item.checks.launchSettings.launchTargetPath || "missing") : "empty window"} · ${item.checks.launchSettings.valid ? "valid" : "invalid"}</p>`
+            : `<p class="path">Launch Target: n/a</p>`
+        }
+      </div>
+      <div class="health-section-block">
+        <p class="panel-kicker">Issues</p>
+        <ul class="health-listing">${issuesMarkup}</ul>
+      </div>
+      <div class="health-section-block">
+        <p class="panel-kicker">Recommended Actions</p>
+        <ul class="health-listing">${recommendationsMarkup}</ul>
+      </div>
+    `;
+    healthList.append(card);
   });
 }
 
@@ -1089,6 +1196,12 @@ async function refreshHomes() {
   renderHomes();
   renderRestoreTargets();
   populateHomeSelectors();
+  await refreshHealth();
+}
+
+async function refreshHealth() {
+  state.healthReport = await request("/api/health");
+  renderHealth();
 }
 
 async function refreshSessions() {
@@ -1261,6 +1374,7 @@ toggleNoAuthHomesButton.addEventListener("click", () => {
   state.hideHomesWithoutAuth = !state.hideHomesWithoutAuth;
   renderHomes();
 });
+document.querySelector("#refresh-health-button").addEventListener("click", () => runTask(refreshHealth));
 document.querySelector("#refresh-homes-button").addEventListener("click", () => runTask(refreshHomes));
 document.querySelector("#refresh-sessions-button").addEventListener("click", () =>
   runTask(refreshSessions),

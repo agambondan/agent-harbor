@@ -80,6 +80,24 @@ This keeps install/update cost low without reintroducing cross-account auth leak
 4. click `Import`
 5. reopen the target Codex profile if you want to continue the imported thread from that profile
 
+### Run Health Check
+
+Use this when you want one panel that summarizes slot hygiene without manually checking homes, launchers, and state DB paths one by one.
+
+1. open the `Health Check` panel
+2. click `Refresh Health`
+3. inspect any `Critical` or `Warning` cards
+4. follow the recommended action shown in the card
+
+The panel currently checks:
+
+1. whether auth identity is present
+2. whether `sessions`, `archived_sessions`, or `session_index.jsonl` still leak to the shared root
+3. whether the extensions directory exists and has extension folders
+4. whether launcher wrappers exist and still match current Harbor config
+5. whether a saved custom launch target is still valid
+6. whether `state.vscdb` is present and readable
+
 ### Repair a Home
 
 Use repair when you suspect profiles still share the same session directory.

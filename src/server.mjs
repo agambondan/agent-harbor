@@ -1622,6 +1622,245 @@ async function detachSharedForHome(config, home, { resetOpenAIState = true } = {
   };
 }
 
+async function sharedLinkLeakEntries(config, home) {
+  const sharedRoot = normalizePath(config.roots.sharedSessionsRoot);
+  const leakedEntries = [];
+
+  for (const entryName of ["sessions", "archived_sessions", "session_index.jsonl"]) {
+    const entryPath = path.join(home.path, entryName);
+    let stats;
+    try {
+      stats = await fs.lstat(entryPath);
+    } catch {
+      continue;
+    }
+    if (!stats.isSymbolicLink()) {
+      continue;
+    }
+
+    const resolved = await fs.realpath(entryPath);
+    if (resolved.startsWith(sharedRoot)) {
+      leakedEntries.push({
+        entryName,
+        entryPath,
+        resolved,
+      });
+    }
+  }
+
+  return leakedEntries;
+}
+
+async function readOpenAiStatePresence(dbPath) {
+  if (!(await pathExists(dbPath))) {
+    return {
+      exists: false,
+      openAiStatePresent: null,
+      error: null,
+    };
+  }
+
+  const script = `
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+cur = con.cursor()
+cur.execute("select count(*) from ItemTable where key = 'openai.chatgpt'")
+row = cur.fetchone()
+con.close()
+print(row[0] if row else 0)
+`.trim();
+
+  try {
+    const output = await spawnCollect("python3", ["-c", script, dbPath]);
+    return {
+      exists: true,
+      openAiStatePresent: Number(String(output.stdout).trim() || "0") > 0,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      openAiStatePresent: null,
+      error: error.message,
+    };
+  }
+}
+
+async function inspectLauncherState(config, slotKey) {
+  const launcherBinDir = normalizePath(config.roots.launcherBinDir);
+  const wrapperPath = path.join(launcherBinDir, `code-${slotKey}`);
+  const aliasPath = path.join(launcherBinDir, slotKey);
+  const expectedWrapper = launcherScriptContent(config, slotKey);
+  const expectedAlias = launcherAliasContent(slotKey);
+
+  const wrapperExists = await pathExists(wrapperPath);
+  const aliasExists = await pathExists(aliasPath);
+  const wrapperSynced =
+    wrapperExists && (await fs.readFile(wrapperPath, "utf8").catch(() => "")) === expectedWrapper;
+  const aliasSynced =
+    aliasExists && (await fs.readFile(aliasPath, "utf8").catch(() => "")) === expectedAlias;
+
+  return {
+    wrapperPath,
+    aliasPath,
+    wrapperExists,
+    aliasExists,
+    wrapperSynced,
+    aliasSynced,
+  };
+}
+
+function summarizeSeverity(issues) {
+  if (issues.some((issue) => issue.severity === "critical")) {
+    return "critical";
+  }
+  if (issues.some((issue) => issue.severity === "warning")) {
+    return "warning";
+  }
+  return "ok";
+}
+
+async function inspectHomeHealth(config, home) {
+  const issues = [];
+  const recommendations = [];
+  const stateDbPath = stateDbForHome(home, config);
+  const stateDb = await readOpenAiStatePresence(stateDbPath);
+  const sharedLinks = await sharedLinkLeakEntries(config, home);
+  const extensionsPath = home.isIsolatedSlot
+    ? extensionsConfigForSlot(config, home.slotKey).dir
+    : mainExtensionsSourceDir(config);
+  const extensionsExists = await pathExists(extensionsPath);
+  let extensionsCount = 0;
+  let extensionsError = null;
+  if (extensionsExists) {
+    try {
+      extensionsCount = (await listSeedableExtensionFolders(extensionsPath)).length;
+    } catch (error) {
+      extensionsError = error.message;
+    }
+  }
+  const launchSettings = home.isIsolatedSlot
+    ? await validateSlotLaunchSettings(config, home.slotKey)
+    : null;
+  const launcher = home.isIsolatedSlot ? await inspectLauncherState(config, home.slotKey) : null;
+
+  if (home.authMissing) {
+    issues.push({
+      severity: "warning",
+      message: "No auth identity detected for this home.",
+    });
+    recommendations.push(
+      home.isIsolatedSlot
+        ? "Open the slot and sign in, or archive it if this slot is no longer needed."
+        : "Verify auth.json if this home should be connected.",
+    );
+  }
+
+  if (sharedLinks.length > 0) {
+    issues.push({
+      severity: "critical",
+      message: `Shared-session leak detected in ${sharedLinks.map((item) => item.entryName).join(", ")}.`,
+    });
+    recommendations.push("Run Repair Home or Repair All Homes to detach shared links.");
+  }
+
+  if (!extensionsExists || extensionsCount === 0) {
+    issues.push({
+      severity: "warning",
+      message: extensionsError
+        ? `Extensions path is not readable as a directory: ${extensionsError}`
+        : "Extensions directory is missing or empty.",
+    });
+    recommendations.push("Run Sync Extensions or Prepare Slot to seed the extensions directory.");
+  }
+
+  if (!stateDb.exists) {
+    issues.push({
+      severity: "warning",
+      message: "VS Code state.vscdb is missing.",
+    });
+  } else if (stateDb.error) {
+    issues.push({
+      severity: "warning",
+      message: `Could not inspect openai.chatgpt state: ${stateDb.error}`,
+    });
+  }
+
+  if (home.isIsolatedSlot && launcher) {
+    if (!launcher.wrapperExists || !launcher.aliasExists) {
+      issues.push({
+        severity: "warning",
+        message: "Launcher wrapper is missing for this slot.",
+      });
+      recommendations.push("Run Install Launchers to regenerate slot wrappers.");
+    } else if (!launcher.wrapperSynced || !launcher.aliasSynced) {
+      issues.push({
+        severity: "warning",
+        message: "Installed launcher wrapper is out of sync with current Harbor config.",
+      });
+      recommendations.push("Run Install Launchers so the terminal wrappers match current settings.");
+    }
+  }
+
+  if (home.isIsolatedSlot && launchSettings?.launchMode === "custom" && !launchSettings.valid) {
+    issues.push({
+      severity: "warning",
+      message: launchSettings.validationMessage || "Custom launch target is invalid.",
+    });
+    recommendations.push("Update Save Launch Settings with an existing folder or .code-workspace file.");
+  }
+
+  const status = summarizeSeverity(issues);
+  return {
+    label: home.label,
+    path: home.path,
+    status,
+    accountEmail: home.account?.email || null,
+    accountPlan: home.account?.plan || null,
+    sessionCount: home.sessionCount,
+    issues,
+    recommendations: [...new Set(recommendations)],
+    checks: {
+      authMissing: home.authMissing,
+      sharedLinks,
+      stateDb: {
+        path: stateDbPath,
+        exists: stateDb.exists,
+        openAiStatePresent: stateDb.openAiStatePresent,
+        error: stateDb.error,
+      },
+      extensions: {
+        path: extensionsPath,
+        exists: extensionsExists,
+        count: extensionsCount,
+        error: extensionsError,
+      },
+      launcher,
+      launchSettings,
+    },
+  };
+}
+
+async function inspectSystemHealth(config) {
+  const homes = await discoverHomes(config);
+  const checks = [];
+
+  for (const home of homes) {
+    checks.push(await inspectHomeHealth(config, home));
+  }
+
+  return {
+    generatedAt: nowIso(),
+    summary: {
+      total: checks.length,
+      ok: checks.filter((item) => item.status === "ok").length,
+      warning: checks.filter((item) => item.status === "warning").length,
+      critical: checks.filter((item) => item.status === "critical").length,
+    },
+    checks,
+  };
+}
+
 async function resetOpenAiState(dbPath) {
   const script = `
 import sqlite3, sys
@@ -2022,6 +2261,13 @@ async function router(request, response) {
       return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
         const homes = await discoverHomes(innerConfig);
         return jsonResponse(innerResponse, 200, { homes });
+      })(context);
+    }
+
+    if (pathname === "/api/health" && request.method === "GET") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const report = await inspectSystemHealth(innerConfig);
+        return jsonResponse(innerResponse, 200, report);
       })(context);
     }
 

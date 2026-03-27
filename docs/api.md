@@ -24,6 +24,7 @@ Protected routes:
 - `POST /api/account-setup/settings`
 - `POST /api/launchers/install`
 - `POST /api/extensions/sync`
+- `GET /api/health`
 - `GET /api/homes`
 - `POST /api/homes/archive`
 - `GET /api/sessions`
@@ -437,6 +438,73 @@ Response shape:
       },
       "sessionCount": 11,
       "stateDbPath": "/home/you/.vscode-isolated/codex-1/user-data/User/globalStorage/state.vscdb"
+    }
+  ]
+}
+```
+
+## `GET /api/health`
+
+Runs a read-only health inspection across all discovered homes.
+
+Success response:
+
+```json
+{
+  "generatedAt": "2026-03-27T12:00:00.000Z",
+  "summary": {
+    "total": 4,
+    "ok": 2,
+    "warning": 1,
+    "critical": 1
+  },
+  "checks": [
+    {
+      "label": "codex-2",
+      "path": "/home/you/.vscode-isolated/codex-2/codex-home",
+      "status": "warning",
+      "accountEmail": "example@gmail.com",
+      "accountPlan": "team",
+      "sessionCount": 85,
+      "issues": [
+        {
+          "severity": "warning",
+          "message": "Installed launcher wrapper is out of sync with current Harbor config."
+        }
+      ],
+      "recommendations": [
+        "Run Install Launchers so the terminal wrappers match current settings."
+      ],
+      "checks": {
+        "authMissing": false,
+        "sharedLinks": [],
+        "stateDb": {
+          "path": "/home/you/.vscode-isolated/codex-2/user-data/User/globalStorage/state.vscdb",
+          "exists": true,
+          "openAiStatePresent": true,
+          "error": null
+        },
+        "extensions": {
+          "path": "/home/you/.vscode-agent-hub/extensions",
+          "exists": true,
+          "count": 61
+        },
+        "launcher": {
+          "wrapperPath": "/home/you/.local/bin/code-codex-2",
+          "aliasPath": "/home/you/.local/bin/codex-2",
+          "wrapperExists": true,
+          "aliasExists": true,
+          "wrapperSynced": false,
+          "aliasSynced": true
+        },
+        "launchSettings": {
+          "launchMode": "custom",
+          "launchTargetPath": "/home/you/work/project",
+          "valid": true,
+          "targetType": "directory",
+          "validationMessage": null
+        }
+      }
     }
   ]
 }

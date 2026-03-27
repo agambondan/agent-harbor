@@ -97,6 +97,19 @@
               <span class="ops-link-copy">Prepare slot akun, install launcher, lalu login per window.</span>
             </span>
           </a>
+          <a href="#health-section" class="ops-link" data-ops-link="health-section" title="Health">
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 12h3l2-4 3 8 2-4h6"></path>
+                <path d="M4 6v12"></path>
+                <path d="M20 6v12"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Health</span>
+              <span class="ops-link-copy">Diagnosis cepat untuk auth, launcher, symlink, dan target launch.</span>
+            </span>
+          </a>
           <a href="#homes-section" class="ops-link" data-ops-link="homes-section" title="Homes">
             <span class="ops-link-badge" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
@@ -223,6 +236,18 @@
         </section>
 
         <div class="panel-grid">
+          <section id="health-section" class="panel" data-nav-section>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">DIAGNOSTICS</p>
+                <h3>Health Check</h3>
+              </div>
+              <button id="refresh-health-button" class="ghost-button">Refresh Health</button>
+            </div>
+            <div id="health-summary" class="stack compact-stack"></div>
+            <div id="health-list" class="stack"></div>
+          </section>
+
           <section id="homes-section" class="panel" data-nav-section>
             <div class="panel-head">
               <div>
