@@ -341,7 +341,7 @@ async function accountSetupSlot(config, order, discoveredHome = null) {
     discoveredHome?.sessionCount ??
     (await countIndexEntries(path.join(paths.codexHome, "session_index.jsonl")));
   const prepared = await pathExists(paths.slotRoot);
-  const workspaceReady = await pathExists(paths.workspacePath);
+  const workspaceReady = await pathExists(paths.workspaceRoot);
   const connected = Boolean(authSummary.email || authSummary.accountIdSuffix);
   const status = connected ? "connected" : prepared ? "awaiting_login" : "not_prepared";
   const statusLabel =
@@ -494,17 +494,6 @@ async function prepareAccountSlot(config, slotKey) {
     operations.push(...sharedExtensions.operations);
   }
 
-  if (!(await pathExists(paths.workspacePath))) {
-    const workspace = {
-      folders: [],
-      settings: {
-        "window.title": `${slotKey} · Agent Harbor`,
-      },
-    };
-    await fs.writeFile(paths.workspacePath, `${JSON.stringify(workspace, null, 2)}\n`, "utf8");
-    operations.push("Created default workspace file.");
-  }
-
   const order = Number(slotKey.replace("codex-", ""));
   const slot = await accountSetupSlot(config, order);
   return {
@@ -550,7 +539,6 @@ async function launchAccountSlot(config, slotKey, { dryRun = false } = {}) {
     "off",
     "--password-store=basic",
     "--new-window",
-    paths.workspacePath,
   ];
 
   if (!dryRun) {
@@ -602,7 +590,6 @@ set -euo pipefail
 ISOLATED_ROOT="${shellPathWithHome(paths.slotRoot)}"
 USER_DATA_DIR="${shellPathWithHome(paths.userDataDir)}"
 EXTENSIONS_DIR="${shellPathWithHome(extensions.dir)}"
-DEFAULT_WORKSPACE="${shellPathWithHome(paths.workspacePath)}"
 XDG_CONFIG_DIR="${shellPathWithHome(paths.xdgConfigDir)}"
 XDG_CACHE_DIR="${shellPathWithHome(paths.xdgCacheDir)}"
 XDG_DATA_DIR="${shellPathWithHome(paths.xdgDataDir)}"
@@ -621,19 +608,6 @@ mkdir -p \\
   "\${CLOUDSDK_CONFIG_DIR}"
 
 "\${HOME}/.local/bin/codex-detach-shared-sessions" --home "\${CODEX_HOME_DIR}" >/dev/null 2>&1 || true
-
-if [ ! -f "\${DEFAULT_WORKSPACE}" ]; then
-  cat > "\${DEFAULT_WORKSPACE}" <<'WS'
-{
-  "folders": [],
-  "settings": {}
-}
-WS
-fi
-
-if [ "$#" -eq 0 ]; then
-  set -- "\${DEFAULT_WORKSPACE}"
-fi
 
 PATH_WITH_TOOLS="\${HOME}/.local/bin:\${HOME}/.local/opt/go-current/bin:\${HOME}/go/bin:\${PATH}"
 

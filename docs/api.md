@@ -240,8 +240,7 @@ Response shape:
         "slotKey": "codex-1"
       },
       "operations": [
-        "Prepared CODEX_HOME directory.",
-        "Created default workspace file."
+        "Prepared CODEX_HOME directory."
       ]
     }
   ]
@@ -250,7 +249,7 @@ Response shape:
 
 ## `POST /api/account-setup/launch`
 
-Ensures a slot exists and launches a fresh isolated VS Code window for that slot.
+Ensures a slot exists and launches a fresh isolated VS Code window for that slot without forcing a default `.code-workspace` file.
 
 Request body:
 

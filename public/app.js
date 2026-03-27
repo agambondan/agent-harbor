@@ -435,7 +435,7 @@ function renderAccountSetup() {
       </div>
       <div class="stack compact-stack">
         <p class="path">Home: ${slot.homePath}</p>
-        <p class="path">Workspace: ${slot.workspacePath}</p>
+        <p class="path">Workspace Root: ${slot.rootPath}/workspace</p>
         <p class="path">Extensions: ${slot.extensionsMode} · ${slot.extensionsPath}</p>
         <p class="path">Launcher: ${slot.launcherPath}</p>
         <p class="muted">${slot.sessionCount} thread tersimpan di slot ini.</p>
@@ -451,7 +451,7 @@ function renderAccountSetup() {
         confirmAction(
           {
             title: `Prepare ${slot.displayName}?`,
-            message: "Harbor will create the isolated folders and workspace for this account slot.",
+            message: "Harbor will create the isolated folders and runtime directories for this account slot.",
             confirmText: "Prepare Slot",
             details: [slot.homePath, slot.launcherPath],
           },
@@ -1108,7 +1108,7 @@ document.querySelector("#prepare-all-slots-button").addEventListener("click", ()
       {
         title: "Prepare all account slots?",
         message:
-          "Harbor will create or refresh every isolated slot defined in the current config, including workspace and runtime folders.",
+          "Harbor will create or refresh every isolated slot defined in the current config, including runtime folders but without forcing a default workspace file.",
         confirmText: "Prepare All",
         details: [`Total slots: ${state.config?.setup?.isolatedAccountSlots || 0}`],
       },

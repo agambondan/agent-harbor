@@ -51,7 +51,7 @@ The intended setup flow is:
 1. prepare the slot from Harbor so the profile gets isolated `user-data`, `xdg`, and `CODEX_HOME`
 2. if you use `shared` extension mode, verify every slot points at the same `Shared Extensions Dir`
 3. if the extension list looks empty in a codex window, run `Sync Extensions` from Harbor to copy binaries from the main VS Code install
-4. click `Launch VS Code`
+4. click `Launch VS Code` and Harbor will open an empty fresh window by default, not a forced `.code-workspace`
 5. in that fresh window, open the ChatGPT, Codex, Claude, Copilot, or Gemini extension and run its sign-in flow
 6. complete browser login for the exact account that belongs to that slot
 7. return to Harbor and click `Refresh Slots`
