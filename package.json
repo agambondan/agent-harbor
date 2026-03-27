@@ -1,0 +1,13 @@
+{
+  "name": "agent-harbor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local control plane for shared-extension, isolated-auth AI agent profiles in VS Code.",
+  "scripts": {
+    "dev": "node --watch src/server.mjs",
+    "start": "bash ./scripts/start-safe.sh",
+    "start:raw": "node src/server.mjs",
+    "restart": "bash ./scripts/restart-safe.sh"
+  }
+}

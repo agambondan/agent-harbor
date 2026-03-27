@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Harbor</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background">
+      <div class="orb orb-a"></div>
+      <div class="orb orb-b"></div>
+      <div class="grid"></div>
+    </div>
+
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">LOCAL CONTROL PLANE</p>
+        <h1 id="app-title">Agent Harbor</h1>
+        <p class="subtitle">
+          Keep multi-account AI agent setups connected without leaking auth state, usage limits,
+          or shared-session corruption across ChatGPT, Claude, Copilot, and Gemini workflows.
+        </p>
+      </section>
+
+      <section id="auth-panel" class="auth-panel"></section>
+
+      <section id="dashboard" class="dashboard hidden">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">SESSION OPERATIONS</p>
+            <h2>Ops Deck</h2>
+          </div>
+          <div class="header-actions">
+            <span id="login-chip" class="chip"></span>
+            <button id="logout-button" class="ghost-button">Logout</button>
+          </div>
+        </div>
+
+        <nav class="ops-menu panel panel-wide" aria-label="Operations menu">
+          <button
+            id="ops-toggle-button"
+            class="ghost-button ops-toggle"
+            type="button"
+            aria-label="Collapse sidebar"
+            aria-pressed="false"
+            title="Collapse sidebar"
+          >
+            <span class="ops-toggle-visual" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <rect x="4" y="5" width="16" height="14" rx="3"></rect>
+                <path d="M9 5v14"></path>
+                <path d="M15 9l-3 3 3 3"></path>
+              </svg>
+            </span>
+            <span class="visually-hidden">Collapse sidebar</span>
+          </button>
+          <a
+            href="#path-control-section"
+            class="ops-link active"
+            data-ops-link="path-control-section"
+            title="Path Control"
+          >
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 7h8"></path>
+                <path d="M15 7h5"></path>
+                <path d="M10 7a2 2 0 1 1 4 0a2 2 0 0 1-4 0Z"></path>
+                <path d="M4 17h5"></path>
+                <path d="M14 17h6"></path>
+                <path d="M9 17a2 2 0 1 1 4 0a2 2 0 0 1-4 0Z"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Path Control</span>
+              <span class="ops-link-copy">Atur roots, slot count, dan mode shared extension.</span>
+            </span>
+          </a>
+          <a
+            href="#account-dock-section"
+            class="ops-link"
+            data-ops-link="account-dock-section"
+            title="Account Dock"
+          >
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M9 10a3 3 0 1 0 0-6a3 3 0 0 0 0 6Z"></path>
+                <path d="M4 19c0-2.761 2.239-5 5-5"></path>
+                <path d="M15 11a2.5 2.5 0 1 0 0-5a2.5 2.5 0 0 0 0 5Z"></path>
+                <path d="M13 19h7"></path>
+                <path d="M16.5 15.5v7"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Account Dock</span>
+              <span class="ops-link-copy">Prepare slot akun, install launcher, lalu login per window.</span>
+            </span>
+          </a>
+          <a href="#homes-section" class="ops-link" data-ops-link="homes-section" title="Homes">
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 11.5 12 5l8 6.5"></path>
+                <path d="M6.5 10.5V19h11v-8.5"></path>
+                <path d="M10 19v-4.5h4V19"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Homes</span>
+              <span class="ops-link-copy">Lihat semua home aktif dan ringkasan akun yang terbaca.</span>
+            </span>
+          </a>
+          <a href="#repair-section" class="ops-link" data-ops-link="repair-section" title="Repair">
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="m14.5 5.5 4 4"></path>
+                <path d="m12 8 4-4 3.5 3.5-4 4"></path>
+                <path d="m11 9-6.5 6.5 4 4L15 13"></path>
+                <path d="M4 20h5"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Repair</span>
+              <span class="ops-link-copy">Detach symlink lama dan reset state VS Code bila perlu.</span>
+            </span>
+          </a>
+          <a
+            href="#session-shuttle-section"
+            class="ops-link"
+            data-ops-link="session-shuttle-section"
+            title="Shuttle"
+          >
+            <span class="ops-link-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M7 7h11"></path>
+                <path d="m14 4 4 3-4 3"></path>
+                <path d="M17 17H6"></path>
+                <path d="m10 14-4 3 4 3"></path>
+              </svg>
+            </span>
+            <span class="ops-link-body">
+              <span class="ops-link-title">Shuttle</span>
+              <span class="ops-link-copy">Import atau broadcast session antar akun secara aman.</span>
+            </span>
+          </a>
+        </nav>
+
+        <section id="path-control-section" class="panel panel-wide" data-nav-section>
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">CONFIG</p>
+              <h3>Path Control</h3>
+            </div>
+            <button id="save-config-button" class="accent-button">Save Paths</button>
+          </div>
+          <form id="config-form" class="config-grid">
+            <label>
+              <span>App Name</span>
+              <input name="appName" type="text" />
+            </label>
+            <label>
+              <span>Isolated Account Slots</span>
+              <input name="isolatedAccountSlots" type="number" min="1" max="12" />
+            </label>
+            <label>
+              <span>Extensions Mode</span>
+              <select name="extensionsMode">
+                <option value="shared">Shared binaries, isolated auth</option>
+                <option value="isolated">Fully isolated per slot</option>
+              </select>
+            </label>
+            <label>
+              <span>Main Codex Home</span>
+              <input name="mainCodexHome" type="text" />
+            </label>
+            <label>
+              <span>Main VS Code Extensions Dir</span>
+              <input name="mainVSCodeExtensionsDir" type="text" />
+            </label>
+            <label>
+              <span>Isolated Profiles Root</span>
+              <input name="isolatedProfilesRoot" type="text" />
+            </label>
+            <label>
+              <span>Shared Extensions Dir</span>
+              <input name="sharedExtensionsDir" type="text" />
+            </label>
+            <label>
+              <span>Shared Sessions Root</span>
+              <input name="sharedSessionsRoot" type="text" />
+            </label>
+            <label>
+              <span>Launcher Bin Dir</span>
+              <input name="launcherBinDir" type="text" />
+            </label>
+            <label>
+              <span>Main VS Code state.vscdb</span>
+              <input name="mainVSCodeStateDb" type="text" />
+            </label>
+          </form>
+        </section>
+
+        <section id="account-dock-section" class="panel panel-wide" data-nav-section>
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">ONBOARDING</p>
+              <h3>Account Login Dock</h3>
+            </div>
+            <div class="header-actions">
+              <button id="refresh-account-setup-button" class="ghost-button">Refresh Slots</button>
+              <button id="prepare-all-slots-button" class="accent-button">Prepare All Slots</button>
+              <button id="install-launchers-button" class="ghost-button">Install Launchers</button>
+              <button id="sync-extensions-button" class="ghost-button">Sync Extensions</button>
+            </div>
+          </div>
+          <p class="muted">
+            Gunakan panel ini saat baru mau setup akun ChatGPT, Claude, Copilot, atau Gemini.
+            Extension binaries bisa dishare, tapi setiap slot tetap punya auth, `user-data`, dan `CODEX_HOME` yang terpisah.
+          </p>
+          <div id="account-guide" class="guide-banner"></div>
+          <div id="account-slots-list" class="slot-grid"></div>
+          <div id="account-setup-log" class="log-box"></div>
+        </section>
+
+        <div class="panel-grid">
+          <section id="homes-section" class="panel" data-nav-section>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">DISCOVERY</p>
+                <h3>Homes</h3>
+              </div>
+              <div class="header-actions">
+                <button id="toggle-no-auth-homes-button" class="ghost-button">Hide No-Auth</button>
+                <button id="refresh-homes-button" class="ghost-button">Refresh</button>
+              </div>
+            </div>
+            <div id="homes-list" class="stack"></div>
+          </section>
+
+          <section id="repair-section" class="panel" data-nav-section>
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">RECOVERY</p>
+                <h3>Isolation Repair</h3>
+              </div>
+              <div class="header-actions">
+                <button id="preview-shared-history-button" class="ghost-button">Preview Shared History</button>
+                <button id="restore-shared-history-button" class="ghost-button">Restore Shared History</button>
+                <button id="repair-all-button" class="warn-button">Repair All Homes</button>
+              </div>
+            </div>
+            <div class="stack">
+              <label class="inline-toggle">
+                <input id="repair-reset-toggle" type="checkbox" checked />
+                <span>Reset VS Code `openai.chatgpt` state while repairing</span>
+              </label>
+              <p class="muted">
+                This detaches any `sessions` symlink that still points at a shared folder and
+                restores local copies per account.
+              </p>
+              <p class="muted">
+                Use <strong>Restore Shared History</strong> if you want to re-import the old
+                symlink-era chat history from the configured shared sessions root without
+                re-sharing auth state.
+              </p>
+              <label class="inline-toggle">
+                <input id="restore-archived-toggle" type="checkbox" checked />
+                <span>Also copy missing archived_sessions files</span>
+              </label>
+              <div id="restore-targets-list" class="stack compact-stack"></div>
+              <div id="repair-log" class="log-box"></div>
+            </div>
+          </section>
+        </div>
+
+        <section id="session-shuttle-section" class="panel panel-wide" data-nav-section>
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">TRANSFER</p>
+              <h3>Session Shuttle</h3>
+            </div>
+            <button id="refresh-sessions-button" class="ghost-button">Refresh Sessions</button>
+          </div>
+          <div class="session-toolbar">
+            <label>
+              <span>Target Home</span>
+              <select id="target-home-select"></select>
+            </label>
+            <label>
+              <span>Source Filter</span>
+              <select id="source-home-select">
+                <option value="">All sources</option>
+              </select>
+            </label>
+            <label class="session-search">
+              <span>Search</span>
+              <input id="session-query" type="search" placeholder="title or session id" />
+            </label>
+            <label class="inline-toggle">
+              <input id="overwrite-toggle" type="checkbox" />
+              <span>Overwrite if session already exists in target</span>
+            </label>
+          </div>
+          <div class="session-broadcast">
+            <label>
+              <span>Share Latest Session From</span>
+              <select id="share-source-home-select"></select>
+            </label>
+            <button id="share-current-button" class="accent-button">Share Current Session To All Homes</button>
+          </div>
+          <p class="muted">
+            This uses the latest session found in the selected source home's `history.jsonl`. If
+            the live thread has not flushed into `sessions/` yet, Harbor materializes a portable
+            session first and then broadcasts it safely.
+          </p>
+          <div id="share-log" class="log-box"></div>
+          <div id="sessions-list" class="session-list"></div>
+        </section>
+      </section>
+
+      <div id="confirm-modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <p class="panel-kicker">CONFIRMATION</p>
+          <h3 id="confirm-title">Confirm action</h3>
+          <p id="confirm-message" class="muted"></p>
+          <div id="confirm-details" class="confirm-details hidden"></div>
+          <div class="modal-actions">
+            <button id="confirm-cancel-button" class="ghost-button" type="button">Cancel</button>
+            <button id="confirm-submit-button" class="accent-button" type="button">Continue</button>
+          </div>
+        </div>
+      </div>
+
+      <aside id="toast" class="toast hidden"></aside>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
