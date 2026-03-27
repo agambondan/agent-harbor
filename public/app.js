@@ -30,6 +30,7 @@ const accountGuide = document.querySelector("#account-guide");
 const accountSlotsList = document.querySelector("#account-slots-list");
 const accountSetupLog = document.querySelector("#account-setup-log");
 const healthSummary = document.querySelector("#health-summary");
+const healthLog = document.querySelector("#health-log");
 const healthList = document.querySelector("#health-list");
 const homesList = document.querySelector("#homes-list");
 const toggleNoAuthHomesButton = document.querySelector("#toggle-no-auth-homes-button");
@@ -385,6 +386,48 @@ function healthStatusLabel(status) {
   if (status === "ok") return "Healthy";
   if (status === "critical") return "Critical";
   return "Warning";
+}
+
+function buttonClassForTone(tone) {
+  if (tone === "warn") return "warn-button";
+  if (tone === "accent") return "accent-button";
+  return "ghost-button";
+}
+
+async function runHealthFixAction(item, fix) {
+  const details = [...(fix.details || [])];
+  if (fix.code === "repair-home") {
+    details.push(
+      repairResetToggle.checked
+        ? "Reset VS Code openai.chatgpt state: yes"
+        : "Reset VS Code openai.chatgpt state: no",
+    );
+  }
+
+  await confirmAction(
+    {
+      title: fix.confirmTitle || `Run ${fix.label}?`,
+      message: fix.confirmMessage || "Harbor will run the selected health fix action.",
+      confirmText: fix.label,
+      tone: fix.tone === "warn" ? "warn" : "accent",
+      details,
+    },
+    async () => {
+      const result = await request("/api/health/fix", {
+        method: "POST",
+        body: JSON.stringify({
+          action: fix.code,
+          homePath: item.path,
+          resetOpenAIState: repairResetToggle.checked,
+        }),
+      });
+      healthLog.textContent = (result.operations || []).join("\n");
+      showToast(`${fix.label} finished for ${item.label}.`, "success");
+      await refreshAccountSetup();
+      await refreshHomes();
+      await refreshSessions();
+    },
+  );
 }
 
 function formatBytes(bytes) {
@@ -798,6 +841,7 @@ function renderHomes() {
 function renderHealth() {
   healthSummary.innerHTML = "";
   healthList.innerHTML = "";
+  healthLog.textContent = healthLog.textContent || "";
 
   if (!state.healthReport) {
     healthSummary.innerHTML = `<p class="muted">No health data loaded yet.</p>`;
@@ -848,6 +892,15 @@ function renderHealth() {
       item.recommendations.length > 0
         ? item.recommendations.map((line) => `<li>${escapeHtml(line)}</li>`).join("")
         : `<li>No action needed.</li>`;
+    const fixesMarkup =
+      item.fixes?.length > 0
+        ? item.fixes
+            .map(
+              (fix) =>
+                `<button class="${buttonClassForTone(fix.tone)} compact-button" data-fix-code="${escapeHtml(fix.code)}">${escapeHtml(fix.label)}</button>`,
+            )
+            .join("")
+        : `<p class="muted">No direct auto-fix available for this card.</p>`;
 
     card.innerHTML = `
       <div class="home-head">
@@ -882,7 +935,18 @@ function renderHealth() {
         <p class="panel-kicker">Recommended Actions</p>
         <ul class="health-listing">${recommendationsMarkup}</ul>
       </div>
+      <div class="health-section-block">
+        <p class="panel-kicker">Auto Fix</p>
+        <div class="home-actions">${fixesMarkup}</div>
+      </div>
     `;
+    card.querySelectorAll("[data-fix-code]").forEach((button) => {
+      const fix = item.fixes.find((entry) => entry.code === button.dataset.fixCode);
+      if (!fix) {
+        return;
+      }
+      button.addEventListener("click", () => runTask(() => runHealthFixAction(item, fix)));
+    });
     healthList.append(card);
   });
 }

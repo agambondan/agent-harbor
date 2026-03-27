@@ -19,6 +19,7 @@ The project provides a small browser UI and a local backend so you can:
 - batch-clean stale no-auth slots and optionally lower configured slot count when the removed slots were trailing
 - browse Harbor-managed restore points and restore individual backup items from the web UI
 - run a health check dashboard that flags auth gaps, shared-session leaks, launcher drift, empty extension dirs, and invalid custom launch targets
+- trigger direct Health auto-fixes for common issues such as launcher drift, shared-extension seeding, shared-session repair, and stale no-auth slot archiving
 - customize where the app should look for Codex homes, shared storage, and VS Code state files
 
 ## Why This Exists

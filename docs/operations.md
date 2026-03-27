@@ -98,7 +98,8 @@ Use this when you want one panel that summarizes slot hygiene without manually c
 1. open the `Health Check` panel
 2. click `Refresh Health`
 3. inspect any `Critical` or `Warning` cards
-4. follow the recommended action shown in the card
+4. use the `Auto Fix` buttons when Harbor can repair the issue directly
+5. use the text recommendations when a manual decision is still required
 
 The panel currently checks:
 
@@ -108,6 +109,15 @@ The panel currently checks:
 4. whether launcher wrappers exist and still match current Harbor config
 5. whether a saved custom launch target is still valid
 6. whether `state.vscdb` is present and readable
+
+Auto-fix coverage currently includes:
+
+1. `Repair Home` when shared-session symlink leaks are detected
+2. `Sync Extensions` when shared extension slots point at an empty shared extension directory
+3. `Install Launchers` when wrapper files are missing or stale
+4. `Prepare Slot` when an isolated slot is missing its runtime directories
+5. `Archive Slot` when a stale no-auth isolated slot should be parked
+6. `Reset Launch To Empty` when a saved custom launch target is broken
 
 ### Repair a Home
 

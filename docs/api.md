@@ -25,6 +25,7 @@ Protected routes:
 - `POST /api/launchers/install`
 - `POST /api/extensions/sync`
 - `GET /api/health`
+- `POST /api/health/fix`
 - `GET /api/homes`
 - `GET /api/backups`
 - `POST /api/homes/archive`
@@ -483,6 +484,18 @@ Success response:
       "recommendations": [
         "Run Install Launchers so the terminal wrappers match current settings."
       ],
+      "fixes": [
+        {
+          "code": "install-launchers",
+          "label": "Install Launchers",
+          "tone": "accent",
+          "confirmTitle": "Install or update launchers?",
+          "confirmMessage": "Harbor will regenerate launcher scripts in the configured bin directory so they match the current config.",
+          "details": [
+            "Bin dir: /home/you/.local/bin"
+          ]
+        }
+      ],
       "checks": {
         "authMissing": false,
         "sharedLinks": [],
@@ -514,6 +527,48 @@ Success response:
         }
       }
     }
+  ]
+}
+```
+
+## `POST /api/health/fix`
+
+Runs one direct corrective action from a Health card.
+
+Request body:
+
+```json
+{
+  "action": "install-launchers",
+  "homePath": "/home/you/.vscode-isolated/codex-2/codex-home",
+  "resetOpenAIState": true
+}
+```
+
+Behavior:
+
+- `action` selects the fix to run
+- `homePath` is required for home-scoped fixes such as `repair-home`, `prepare-slot`, `archive-home`, and `reset-launch-empty`
+- `resetOpenAIState` is used by `repair-home` and defaults to `true`
+
+Supported action codes:
+
+- `repair-home`
+- `sync-extensions`
+- `install-launchers`
+- `prepare-slot`
+- `archive-home`
+- `reset-launch-empty`
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "action": "install-launchers",
+  "operations": [
+    "codex-1: Installed code-codex-1. Installed codex-1.",
+    "codex-2: Installed code-codex-2. Installed codex-2."
   ]
 }
 ```

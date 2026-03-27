@@ -2514,9 +2514,17 @@ function summarizeSeverity(issues) {
   return "ok";
 }
 
+function pushHealthFixAction(bucket, action) {
+  if (bucket.some((item) => item.code === action.code)) {
+    return;
+  }
+  bucket.push(action);
+}
+
 async function inspectHomeHealth(config, home) {
   const issues = [];
   const recommendations = [];
+  const fixes = [];
   const stateDbPath = stateDbForHome(home, config);
   const stateDb = await readOpenAiStatePresence(stateDbPath);
   const sharedLinks = await sharedLinkLeakEntries(config, home);
@@ -2548,6 +2556,19 @@ async function inspectHomeHealth(config, home) {
         ? "Open the slot and sign in, or archive it if this slot is no longer needed."
         : "Verify auth.json if this home should be connected.",
     );
+    if (home.canArchive) {
+      pushHealthFixAction(fixes, {
+        code: "archive-home",
+        label: "Archive Slot",
+        tone: "warn",
+        confirmTitle: `Archive ${home.label}?`,
+        confirmMessage: "Harbor will move this isolated no-auth slot into the archive directory.",
+        details: [
+          home.path,
+          home.slotRoot || "slot root unavailable",
+        ],
+      });
+    }
   }
 
   if (sharedLinks.length > 0) {
@@ -2556,6 +2577,15 @@ async function inspectHomeHealth(config, home) {
       message: `Shared-session leak detected in ${sharedLinks.map((item) => item.entryName).join(", ")}.`,
     });
     recommendations.push("Run Repair Home or Repair All Homes to detach shared links.");
+    pushHealthFixAction(fixes, {
+      code: "repair-home",
+      label: "Repair Home",
+      tone: "warn",
+      confirmTitle: `Repair ${home.label}?`,
+      confirmMessage:
+        "Harbor will detach shared-session links for this home and optionally reset the VS Code ChatGPT state.",
+      details: [home.path],
+    });
   }
 
   if (!extensionsExists || extensionsCount === 0) {
@@ -2566,6 +2596,29 @@ async function inspectHomeHealth(config, home) {
         : "Extensions directory is missing or empty.",
     });
     recommendations.push("Run Sync Extensions or Prepare Slot to seed the extensions directory.");
+    if (home.isIsolatedSlot && sanitizeExtensionsMode(config.setup?.extensionsMode) === "shared") {
+      pushHealthFixAction(fixes, {
+        code: "sync-extensions",
+        label: "Sync Extensions",
+        tone: "accent",
+        confirmTitle: "Sync shared extensions from main VS Code?",
+        confirmMessage:
+          "Harbor will copy extensions from the main VS Code extensions directory into the shared extensions directory used by isolated slots.",
+        details: [
+          `Source: ${mainExtensionsSourceDir(config)}`,
+          `Target: ${normalizePath(config.roots.sharedExtensionsDir)}`,
+        ],
+      });
+    } else if (home.isIsolatedSlot && !extensionsExists) {
+      pushHealthFixAction(fixes, {
+        code: "prepare-slot",
+        label: "Prepare Slot",
+        tone: "accent",
+        confirmTitle: `Prepare ${home.label}?`,
+        confirmMessage: "Harbor will recreate the runtime directories for this isolated slot.",
+        details: [home.path],
+      });
+    }
   }
 
   if (!stateDb.exists) {
@@ -2587,12 +2640,30 @@ async function inspectHomeHealth(config, home) {
         message: "Launcher wrapper is missing for this slot.",
       });
       recommendations.push("Run Install Launchers to regenerate slot wrappers.");
+      pushHealthFixAction(fixes, {
+        code: "install-launchers",
+        label: "Install Launchers",
+        tone: "accent",
+        confirmTitle: "Install or update launchers?",
+        confirmMessage:
+          "Harbor will regenerate launcher scripts in the configured bin directory so they match the current config.",
+        details: [`Bin dir: ${normalizePath(config.roots.launcherBinDir)}`],
+      });
     } else if (!launcher.wrapperSynced || !launcher.aliasSynced) {
       issues.push({
         severity: "warning",
         message: "Installed launcher wrapper is out of sync with current Harbor config.",
       });
       recommendations.push("Run Install Launchers so the terminal wrappers match current settings.");
+      pushHealthFixAction(fixes, {
+        code: "install-launchers",
+        label: "Install Launchers",
+        tone: "accent",
+        confirmTitle: "Install or update launchers?",
+        confirmMessage:
+          "Harbor will regenerate launcher scripts in the configured bin directory so they match the current config.",
+        details: [`Bin dir: ${normalizePath(config.roots.launcherBinDir)}`],
+      });
     }
   }
 
@@ -2602,6 +2673,15 @@ async function inspectHomeHealth(config, home) {
       message: launchSettings.validationMessage || "Custom launch target is invalid.",
     });
     recommendations.push("Update Save Launch Settings with an existing folder or .code-workspace file.");
+    pushHealthFixAction(fixes, {
+      code: "reset-launch-empty",
+      label: "Reset Launch To Empty",
+      tone: "ghost",
+      confirmTitle: `Reset launch target for ${home.label}?`,
+      confirmMessage:
+        "Harbor will clear the broken custom launch target and switch this slot back to empty-window launch mode.",
+      details: [launchSettings.launchTargetPath || "missing custom target"],
+    });
   }
 
   const status = summarizeSeverity(issues);
@@ -2614,6 +2694,7 @@ async function inspectHomeHealth(config, home) {
     sessionCount: home.sessionCount,
     issues,
     recommendations: [...new Set(recommendations)],
+    fixes,
     checks: {
       authMissing: home.authMissing,
       sharedLinks,
@@ -2653,6 +2734,102 @@ async function inspectSystemHealth(config) {
     },
     checks,
   };
+}
+
+async function runHealthFix(config, { action = "", homePath = "", resetOpenAIState = true }) {
+  const code = String(action || "").trim();
+  const normalizedHomePath = homePath ? normalizePath(homePath) : "";
+  const homes = normalizedHomePath ? await discoverHomes(config) : [];
+  const home = normalizedHomePath ? homes.find((item) => item.path === normalizedHomePath) || null : null;
+
+  if (["repair-home", "prepare-slot", "archive-home", "reset-launch-empty"].includes(code) && !home) {
+    throw new Error("A valid homePath is required for this health fix.");
+  }
+
+  if (code === "repair-home") {
+    const result = await detachSharedForHome(config, home, {
+      resetOpenAIState: Boolean(resetOpenAIState),
+    });
+    return {
+      ok: true,
+      action: code,
+      home: home.label,
+      operations: result.actions.length > 0 ? result.actions : ["No shared links needed repair."],
+    };
+  }
+
+  if (code === "sync-extensions") {
+    const result = await syncSharedExtensions(config, { force: false });
+    return {
+      ok: true,
+      action: code,
+      operations: result.operations,
+    };
+  }
+
+  if (code === "install-launchers") {
+    const result = await installLaunchers(config);
+    const operations = [];
+    if (result.sharedExtensions?.operations?.length) {
+      operations.push(...result.sharedExtensions.operations);
+    }
+    result.results.forEach((item) => {
+      operations.push(`${item.slotKey}: ${item.operations.join(" ")}`);
+    });
+    return {
+      ok: true,
+      action: code,
+      operations,
+    };
+  }
+
+  if (code === "prepare-slot") {
+    if (!home.isIsolatedSlot || !home.slotKey) {
+      throw new Error("Only isolated codex slots can be prepared from Health.");
+    }
+    const result = await prepareAccountSlot(config, home.slotKey);
+    return {
+      ok: true,
+      action: code,
+      home: home.label,
+      operations: result.operations,
+    };
+  }
+
+  if (code === "archive-home") {
+    const result = await archiveNoAuthHome(config, { homePath: home.path });
+    return {
+      ok: true,
+      action: code,
+      home: home.label,
+      operations: result.operations,
+    };
+  }
+
+  if (code === "reset-launch-empty") {
+    if (!home.isIsolatedSlot || !home.slotKey) {
+      throw new Error("Only isolated codex slots can reset launch settings from Health.");
+    }
+    config.setup = {
+      ...config.setup,
+      slotLaunchSettings: {
+        ...(config.setup?.slotLaunchSettings || {}),
+        [home.slotKey]: {
+          launchMode: "empty",
+          launchTargetPath: "",
+        },
+      },
+    };
+    await saveConfig(config);
+    return {
+      ok: true,
+      action: code,
+      home: home.label,
+      operations: [`Reset ${home.slotKey} launch mode to empty window.`],
+    };
+  }
+
+  throw new Error(`Unsupported health fix action: ${code}`);
 }
 
 async function resetOpenAiState(dbPath) {
@@ -3069,6 +3246,18 @@ async function router(request, response) {
       return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
         const report = await inspectSystemHealth(innerConfig);
         return jsonResponse(innerResponse, 200, report);
+      })(context);
+    }
+
+    if (pathname === "/api/health/fix" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
+        const body = await readJsonBody(request);
+        const result = await runHealthFix(innerConfig, {
+          action: String(body.action || ""),
+          homePath: String(body.homePath || ""),
+          resetOpenAIState: body.resetOpenAIState !== false,
+        });
+        return jsonResponse(innerResponse, 200, result);
       })(context);
     }
 
