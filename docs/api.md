@@ -28,6 +28,7 @@ Protected routes:
 - `POST /api/health/fix`
 - `GET /api/audit`
 - `GET /api/homes`
+- `POST /api/homes/alias`
 - `GET /api/backups`
 - `POST /api/homes/archive`
 - `POST /api/backups/restore`
@@ -150,7 +151,11 @@ Example response:
   },
   "setup": {
     "isolatedAccountSlots": 3,
-    "extensionsMode": "shared"
+    "extensionsMode": "shared",
+    "homeAliases": {
+      "main": "work",
+      "codex-1": "personal"
+    }
   },
   "authConfigured": true
 }
@@ -202,7 +207,10 @@ Response shape:
     {
       "order": 1,
       "displayName": "Account 1",
+      "actionLabel": "Account 1 · personal",
       "slotKey": "codex-1",
+      "alias": "personal",
+      "displayLabel": "personal",
       "status": "awaiting_login",
       "statusLabel": "slot ready, waiting for ChatGPT login",
       "prepared": true,
@@ -233,6 +241,10 @@ Response shape:
 
 Notes:
 
+- `slotKey` stays stable even when a friendly label is set
+- `alias` is the saved Harbor-only label for that slot, if any
+- `displayLabel` is the label Harbor should render in the UI for that slot
+- `actionLabel` is the label Harbor should use in action text such as `Launch`, `Prepare`, or toast summaries
 - `launchMode` is `empty` or `custom`
 - `launchTargetPath` is used only when `launchMode` is `custom`
 - `launchTargetValid` becomes `false` when the saved custom path is missing or not a directory / `.code-workspace` file
@@ -434,6 +446,8 @@ Response shape:
   "homes": [
     {
       "label": "codex-1",
+      "alias": "personal",
+      "displayLabel": "personal",
       "path": "/home/you/.vscode-isolated/codex-1/codex-home",
       "slotKey": "codex-1",
       "slotRoot": "/home/you/.vscode-isolated/codex-1",
@@ -449,6 +463,46 @@ Response shape:
       "sessionCount": 11,
       "stateDbPath": "/home/you/.vscode-isolated/codex-1/user-data/User/globalStorage/state.vscdb"
     }
+  ]
+}
+```
+
+Notes:
+
+- `label` is the canonical home key and stays stable
+- `alias` is the saved Harbor-only label for that home, if any
+- `displayLabel` is the label Harbor should render in the UI for that home
+
+## `POST /api/homes/alias`
+
+Creates, updates, or clears a Harbor-only label for one home.
+
+Request body:
+
+```json
+{
+  "homeKey": "codex-1",
+  "alias": "personal"
+}
+```
+
+Behavior:
+
+- `homeKey` must be `main` or a `codex-N` slot key
+- `alias` is trimmed, whitespace-normalized, and capped to 48 characters
+- sending an empty `alias` clears the saved label and returns the home to its canonical label
+- labels are stored in `setup.homeAliases`
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "homeKey": "codex-1",
+  "alias": "personal",
+  "displayLabel": "personal",
+  "operations": [
+    "Saved alias \"personal\" for codex-1."
   ]
 }
 ```
@@ -578,6 +632,7 @@ Notes:
 
 - `authMissing` is `true` when Harbor cannot read usable account identity from `auth.json`
 - `canArchive` is `true` only for isolated `codex-*` slots that currently have no auth data
+- `label` may be the saved display label instead of the canonical home key
 
 ## `GET /api/audit`
 
@@ -851,6 +906,7 @@ Success response:
       "resolvedHomes": [
         {
           "label": "codex-1",
+          "displayLabel": "personal",
           "path": "/home/you/.vscode-isolated/codex-1/codex-home",
           "accountEmail": "user@example.com"
         }

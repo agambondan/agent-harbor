@@ -163,6 +163,7 @@ function defaultConfig() {
     setup: {
       isolatedAccountSlots: 3,
       extensionsMode: "shared",
+      homeAliases: {},
       slotLaunchSettings: {},
       restoreTargetPresets: [],
     },
@@ -239,6 +240,51 @@ function sanitizeRestoreTargetPresetName(value) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function sanitizeHomeKey(value) {
+  const key = String(value || "").trim();
+  if (key === "main") {
+    return key;
+  }
+  return /^codex-\d+$/.test(key) ? key : "";
+}
+
+function sanitizeHomeAlias(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48);
+}
+
+function homeAliases(config) {
+  const raw = config.setup?.homeAliases;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+
+  const aliases = {};
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    const homeKey = sanitizeHomeKey(rawKey);
+    const alias = sanitizeHomeAlias(rawValue);
+    if (!homeKey || !alias) {
+      continue;
+    }
+    aliases[homeKey] = alias;
+  }
+  return aliases;
+}
+
+function aliasForHome(config, homeKey) {
+  const normalizedKey = sanitizeHomeKey(homeKey);
+  if (!normalizedKey) {
+    return "";
+  }
+  return homeAliases(config)[normalizedKey] || "";
+}
+
+function displayLabelForHome(homeKey, alias = "") {
+  return alias || homeKey;
 }
 
 function restoreTargetPresets(config) {
@@ -579,6 +625,7 @@ async function accountSetupSlot(config, order, discoveredHome = null) {
   const paths = isolatedSlotPaths(config, slotKey);
   const extensions = extensionsConfigForSlot(config, slotKey);
   const launchSettings = await validateSlotLaunchSettings(config, slotKey);
+  const alias = discoveredHome?.alias || aliasForHome(config, slotKey);
   const authSummary = discoveredHome?.account || (await loadAuthSummary(paths.codexHome));
   const sessionCount =
     discoveredHome?.sessionCount ??
@@ -597,7 +644,10 @@ async function accountSetupSlot(config, order, discoveredHome = null) {
   return {
     order,
     displayName: `Account ${order}`,
+    actionLabel: alias ? `Account ${order} · ${alias}` : `Account ${order}`,
     slotKey,
+    alias,
+    displayLabel: displayLabelForHome(slotKey, alias),
     status,
     statusLabel,
     prepared,
@@ -667,7 +717,7 @@ async function archiveNoAuthHome(config, { homePath }) {
     throw new Error("Only isolated codex slots can be archived.");
   }
   if (!home.authMissing) {
-    throw new Error(`${home.label} still has auth data. Refusing to archive as a no-auth slot.`);
+    throw new Error(`${home.displayLabel} still has auth data. Refusing to archive as a no-auth slot.`);
   }
   if (!(await pathExists(home.slotRoot))) {
     throw new Error(`Slot root not found: ${home.slotRoot}`);
@@ -705,7 +755,7 @@ async function archiveNoAuthHome(config, { homePath }) {
 
   return {
     ok: true,
-    home: home.label,
+    home: home.displayLabel,
     archivedSlotRoot,
     archiveRoot,
     operations,
@@ -731,7 +781,7 @@ async function staleSlotCleanupPlan(config) {
       }
     }
     candidates.push({
-      label: home.label,
+      label: home.displayLabel,
       slotKey: home.slotKey,
       slotOrder,
       path: home.path,
@@ -1099,8 +1149,11 @@ async function describeHome(label, homePath, config) {
   const slotKey = /^codex-\d+$/.test(label) ? label : null;
   const slotPaths = slotKey ? isolatedSlotPaths(config, slotKey) : null;
   const authMissing = !authSummary.email && !authSummary.accountIdSuffix;
+  const alias = aliasForHome(config, label);
   return {
     label,
+    alias,
+    displayLabel: displayLabelForHome(label, alias),
     path: homePath,
     account: authSummary,
     sessionCount,
@@ -1685,7 +1738,7 @@ async function restoreSharedEraHistory(
     }
 
     results.push({
-      home: home.label,
+      home: home.displayLabel,
       path: home.path,
       restoredSessions,
       restoredArchived,
@@ -1736,7 +1789,7 @@ async function listSessions(config, { targetPath, sourcePath, query, limit = 120
         id: sessionId,
         title,
         updatedAt: entry.updated_at || null,
-        sourceLabel: home.label,
+        sourceLabel: home.displayLabel,
         sourcePath: home.path,
         sourceEmail: home.account.email,
         sourcePlan: home.account.plan,
@@ -1772,6 +1825,7 @@ async function listRestoreTargetPresets(config) {
       missingTargetPaths,
       resolvedHomes: resolvedHomes.map((home) => ({
         label: home.label,
+        displayLabel: home.displayLabel,
         path: home.path,
         accountEmail: home.account?.email || "",
       })),
@@ -1952,7 +2006,7 @@ async function readSessionPreview(config, { sourcePath, sessionId, targetPath = 
     id: sessionId,
     title: inspected.threadName,
     updatedAt: inspected.updatedAt || null,
-    sourceLabel: source.label,
+    sourceLabel: source.displayLabel,
     sourcePath: source.path,
     sourceEmail: source.account.email,
     sourcePlan: source.account.plan,
@@ -1969,7 +2023,7 @@ async function readSessionPreview(config, { sourcePath, sessionId, targetPath = 
     existsInTarget: target
       ? Boolean(await findSessionFile(target.path, sessionId))
       : false,
-    targetLabel: target?.label || null,
+    targetLabel: target?.displayLabel || null,
     totalRecords: 0,
     userMessageCount: 0,
     assistantMessageCount: 0,
@@ -2067,10 +2121,10 @@ async function copySessionArtifacts({
   const operations = [];
 
   if ((await pathExists(targetSessionPath)) && !overwrite) {
-    operations.push(`Session already exists in ${target.label}; skipped main copy.`);
+    operations.push(`Session already exists in ${target.displayLabel}; skipped main copy.`);
   } else {
     await copyEntry(sessionFile, targetSessionPath);
-    operations.push(`Session log copied into ${target.label}.`);
+    operations.push(`Session log copied into ${target.displayLabel}.`);
   }
 
   const sourceSnapshot = path.join(source.path, "shell_snapshots", `${sessionId}.sh`);
@@ -2133,7 +2187,7 @@ async function shareCurrentSession(config, { sourcePath, overwrite = false }) {
 
   const sessionId = await latestSessionIdFromHistory(source.path);
   if (!sessionId) {
-    throw new Error(`Could not determine the latest session from ${source.label}.`);
+    throw new Error(`Could not determine the latest session from ${source.displayLabel}.`);
   }
 
   const ready = await ensureSessionReady(source.path, sessionId);
@@ -2153,7 +2207,7 @@ async function shareCurrentSession(config, { sourcePath, overwrite = false }) {
       overwrite,
     });
     results.push({
-      targetLabel: target.label,
+      targetLabel: target.displayLabel,
       targetPath: target.path,
       operations,
     });
@@ -2162,7 +2216,7 @@ async function shareCurrentSession(config, { sourcePath, overwrite = false }) {
   return {
     ok: true,
     sessionId,
-    sourceLabel: source.label,
+    sourceLabel: source.displayLabel,
     sourcePath: source.path,
     threadName: ready.threadName,
     materializedFromHistory: ready.materialized,
@@ -2284,7 +2338,7 @@ async function collectHomeBackupCatalog(items, seen, home, config) {
       }
       await createBackupCatalogItem(items, seen, {
         ...matcher,
-        homeLabel: home.label,
+        homeLabel: home.displayLabel,
         backupPath: path.join(home.path, entry.name),
       });
     }
@@ -2300,7 +2354,7 @@ async function collectHomeBackupCatalog(items, seen, home, config) {
     await createBackupCatalogItem(items, seen, {
       kind: "state-db-restore-point",
       title: "VS Code openai.chatgpt state reset backup",
-      homeLabel: home.label,
+      homeLabel: home.displayLabel,
       backupPath: path.join(stateDbDir, entry.name),
       targetPath: stateDbPath,
       notes: ["Created before Harbor removed the openai.chatgpt row from state.vscdb."],
@@ -2323,7 +2377,10 @@ async function collectLauncherBackupCatalog(items, seen, config) {
     await createBackupCatalogItem(items, seen, {
       kind: "launcher-backup",
       title: "Launcher backup",
-      homeLabel: targetName.replace(/^code-/, ""),
+      homeLabel: displayLabelForHome(
+        targetName.replace(/^code-/, ""),
+        aliasForHome(config, targetName.replace(/^code-/, "")),
+      ),
       backupPath,
       targetPath: path.join(launcherBinDir, targetName),
       notes: ["Created when Harbor regenerated launcher wrappers."],
@@ -2358,7 +2415,7 @@ async function collectArchivedSlotCatalog(items, seen, config) {
     await createBackupCatalogItem(items, seen, {
       kind: "slot-archive",
       title: "Archived isolated slot",
-      homeLabel: slotKey,
+      homeLabel: displayLabelForHome(slotKey, aliasForHome(config, slotKey)),
       backupPath: path.join(archiveRoot, entry.name),
       targetPath: path.join(normalizePath(config.roots.isolatedProfilesRoot), slotKey),
       slotKey,
@@ -2515,7 +2572,7 @@ async function detachSharedForHome(config, home, { resetOpenAIState = true } = {
   }
 
   return {
-    home: home.label,
+    home: home.displayLabel,
     path: home.path,
     actions,
   };
@@ -2666,7 +2723,7 @@ async function inspectHomeHealth(config, home) {
         code: "archive-home",
         label: "Archive Slot",
         tone: "warn",
-        confirmTitle: `Archive ${home.label}?`,
+        confirmTitle: `Archive ${home.displayLabel}?`,
         confirmMessage: "Harbor will move this isolated no-auth slot into the archive directory.",
         details: [
           home.path,
@@ -2686,7 +2743,7 @@ async function inspectHomeHealth(config, home) {
       code: "repair-home",
       label: "Repair Home",
       tone: "warn",
-      confirmTitle: `Repair ${home.label}?`,
+      confirmTitle: `Repair ${home.displayLabel}?`,
       confirmMessage:
         "Harbor will detach shared-session links for this home and optionally reset the VS Code ChatGPT state.",
       details: [home.path],
@@ -2719,7 +2776,7 @@ async function inspectHomeHealth(config, home) {
         code: "prepare-slot",
         label: "Prepare Slot",
         tone: "accent",
-        confirmTitle: `Prepare ${home.label}?`,
+        confirmTitle: `Prepare ${home.displayLabel}?`,
         confirmMessage: "Harbor will recreate the runtime directories for this isolated slot.",
         details: [home.path],
       });
@@ -2782,7 +2839,7 @@ async function inspectHomeHealth(config, home) {
       code: "reset-launch-empty",
       label: "Reset Launch To Empty",
       tone: "ghost",
-      confirmTitle: `Reset launch target for ${home.label}?`,
+      confirmTitle: `Reset launch target for ${home.displayLabel}?`,
       confirmMessage:
         "Harbor will clear the broken custom launch target and switch this slot back to empty-window launch mode.",
       details: [launchSettings.launchTargetPath || "missing custom target"],
@@ -2791,7 +2848,7 @@ async function inspectHomeHealth(config, home) {
 
   const status = summarizeSeverity(issues);
   return {
-    label: home.label,
+    label: home.displayLabel,
     path: home.path,
     status,
     accountEmail: home.account?.email || null,
@@ -2858,7 +2915,7 @@ async function runHealthFix(config, { action = "", homePath = "", resetOpenAISta
     return {
       ok: true,
       action: code,
-      home: home.label,
+      home: home.displayLabel,
       operations: result.actions.length > 0 ? result.actions : ["No shared links needed repair."],
     };
   }
@@ -2896,7 +2953,7 @@ async function runHealthFix(config, { action = "", homePath = "", resetOpenAISta
     return {
       ok: true,
       action: code,
-      home: home.label,
+      home: home.displayLabel,
       operations: result.operations,
     };
   }
@@ -2906,7 +2963,7 @@ async function runHealthFix(config, { action = "", homePath = "", resetOpenAISta
     return {
       ok: true,
       action: code,
-      home: home.label,
+      home: home.displayLabel,
       operations: result.operations,
     };
   }
@@ -2929,7 +2986,7 @@ async function runHealthFix(config, { action = "", homePath = "", resetOpenAISta
     return {
       ok: true,
       action: code,
-      home: home.label,
+      home: home.displayLabel,
       operations: [`Reset ${home.slotKey} launch mode to empty window.`],
     };
   }
@@ -2981,6 +3038,7 @@ function sanitizeConfig(config) {
     setup: {
       isolatedAccountSlots: clampSlotCount(config.setup?.isolatedAccountSlots),
       extensionsMode: sanitizeExtensionsMode(config.setup?.extensionsMode),
+      homeAliases: homeAliases(config),
     },
     authConfigured: Boolean(config.auth),
   };
@@ -3392,6 +3450,66 @@ async function router(request, response) {
       return requiredAuth(async ({ response: innerResponse, config: innerConfig }) => {
         const homes = await discoverHomes(innerConfig);
         return jsonResponse(innerResponse, 200, { homes });
+      })(context);
+    }
+
+    if (pathname === "/api/homes/alias" && request.method === "POST") {
+      return requiredAuth(async ({ response: innerResponse, config: innerConfig, session: currentSession }) => {
+        const body = await readJsonBody(request);
+        const homeKey = sanitizeHomeKey(body.homeKey || body.homeLabel || body.label);
+        if (!homeKey) {
+          return jsonResponse(innerResponse, 400, { error: "Valid homeKey is required." });
+        }
+
+        const alias = sanitizeHomeAlias(body.alias);
+        const aliases = homeAliases(innerConfig);
+        const previousAlias = aliases[homeKey] || "";
+        if (alias) {
+          aliases[homeKey] = alias;
+        } else {
+          delete aliases[homeKey];
+        }
+
+        innerConfig.setup = {
+          ...innerConfig.setup,
+          homeAliases: aliases,
+        };
+        await saveConfig(innerConfig);
+
+        const homes = await discoverHomes(innerConfig);
+        const home = homes.find((item) => item.label === homeKey) || null;
+        const slotOrder = slotOrderFromKey(homeKey);
+        const slot = slotOrder ? await accountSetupSlot(innerConfig, slotOrder, home || null) : null;
+        const displayLabel = displayLabelForHome(homeKey, alias);
+        const operations = alias
+          ? [`Saved alias "${alias}" for ${homeKey}.`]
+          : [`Removed alias for ${homeKey}; using the default label again.`];
+
+        await safeAppendAuditEvent({
+          actor: currentSession.username,
+          action: "homes.alias",
+          summary: alias
+            ? `Saved alias for ${homeKey}.`
+            : `Cleared alias for ${homeKey}.`,
+          targetLabel: displayLabel,
+          targetPath: home?.path || "",
+          operations,
+          metadata: {
+            homeKey,
+            previousAlias,
+            alias,
+          },
+        });
+
+        return jsonResponse(innerResponse, 200, {
+          ok: true,
+          homeKey,
+          alias,
+          displayLabel,
+          home,
+          slot,
+          operations,
+        });
       })(context);
     }
 

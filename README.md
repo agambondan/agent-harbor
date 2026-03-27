@@ -10,6 +10,7 @@ The project provides a small browser UI and a local backend so you can:
 - install or refresh launcher scripts such as `code-codex-1` and `codex-1` from the UI
 - discover Codex homes from `~/.codex` and `~/.vscode-isolated/*/codex-home`
 - inspect account metadata derived from each home's `auth.json`
+- save human-friendly labels such as `work`, `personal`, or `testing` per home / slot and reuse them across Harbor selectors and dashboards
 - search and import individual sessions from one profile into another
 - broadcast the latest live session from one profile into every other detected profile
 - repair broken setups where several profiles accidentally point at a shared `sessions` directory
@@ -96,7 +97,8 @@ The backend scans:
 
 For each home it reports:
 
-- label such as `main`, `codex-1`, `codex-2`
+- canonical label such as `main`, `codex-1`, `codex-2`
+- optional human-friendly label such as `work`, `personal`, or `testing`
 - filesystem path
 - email and plan decoded from `auth.json` when available
 - session count from `session_index.jsonl`
@@ -109,6 +111,7 @@ The onboarding panel is meant for fresh multi-account setup:
 - choose how many isolated account slots you want, default `3`
 - choose whether extension binaries should be `shared` or fully `isolated`
 - prepare each slot so it gets its own `user-data`, `xdg`, `cloudsdk`, optional workspace directory, and `CODEX_HOME`
+- assign a friendly label to each slot so the UI can show `work`, `personal`, or any other short alias instead of only `codex-*`
 - set a per-slot default launch mode: `empty window` or `custom workspace / folder`
 - optionally point every slot at one shared extensions directory
 - seed or refresh that shared extensions directory from the main VS Code install
@@ -118,6 +121,16 @@ The onboarding panel is meant for fresh multi-account setup:
 - install launcher scripts from the UI so terminal commands match the current isolation strategy
 
 This keeps account 1, 2, and 3 separate from day one instead of trying to split them after they have already shared state.
+
+The saved labels are local Harbor metadata only. They do not modify Codex auth files, session logs, or VS Code state. Harbor simply reuses them across:
+
+- Account Login Dock
+- Homes
+- Session Shuttle selectors and results
+- Recovery target selection and presets
+- Backup Catalog
+- Health Check
+- Audit summaries
 
 ### 4. Session Shuttle
 

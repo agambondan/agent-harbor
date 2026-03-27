@@ -401,6 +401,32 @@ function buttonClassForTone(tone) {
   return "ghost-button";
 }
 
+function homeDisplayLabel(home) {
+  return home?.displayLabel || home?.alias || home?.label || "unknown";
+}
+
+function homeSecondaryLabel(home) {
+  return home?.alias ? home.label : "";
+}
+
+function slotDisplayLabel(slot) {
+  return slot?.displayLabel || slot?.alias || slot?.slotKey || slot?.displayName || "slot";
+}
+
+function slotActionLabel(slot) {
+  return slot?.actionLabel || slot?.displayName || slotDisplayLabel(slot);
+}
+
+async function saveHomeAlias(homeKey, alias) {
+  return request("/api/homes/alias", {
+    method: "POST",
+    body: JSON.stringify({
+      homeKey,
+      alias,
+    }),
+  });
+}
+
 async function runHealthFixAction(item, fix) {
   const details = [...(fix.details || [])];
   if (fix.code === "repair-home") {
@@ -542,14 +568,14 @@ function appendAccountSetupLog(payload) {
       const operations = result.operations?.length
         ? result.operations.join(" ")
         : "No setup changes were needed.";
-      if (result.slot?.displayName) {
-        lines.push(`${result.slot.displayName}: ${operations}`);
+      if (result.slot) {
+        lines.push(`${slotActionLabel(result.slot)}: ${operations}`);
       } else if (result.slotKey) {
         lines.push(`${result.slotKey}: ${operations}`);
       }
     });
   } else if (payload.slot) {
-    lines.push(`${payload.slot.displayName}: ${payload.preparedOperations?.join(" ") || "Slot ready."}`);
+    lines.push(`${slotActionLabel(payload.slot)}: ${payload.preparedOperations?.join(" ") || "Slot ready."}`);
     if (payload.launch?.command) {
       lines.push(`Launch command: ${payload.launch.command} ${payload.launch.args.join(" ")}`);
     }
@@ -593,6 +619,7 @@ function renderAccountSetup() {
     const card = document.createElement("article");
     card.className = "account-slot-card";
     const accountBits = [
+      slot.alias ? slot.slotKey : null,
       slot.account?.email || "Belum login",
       slot.account?.plan ? `plan ${slot.account.plan}` : null,
       slot.account?.accountIdSuffix ? `acct …${slot.account.accountIdSuffix}` : null,
@@ -604,7 +631,7 @@ function renderAccountSetup() {
       <p class="panel-kicker">${slot.displayName}</p>
       <div class="home-head">
         <div>
-          <h4>${slot.slotKey}</h4>
+          <h4>${slotDisplayLabel(slot)}</h4>
           <p class="muted">${accountBits}</p>
         </div>
         <span class="chip ${statusChipTone(slot.status)}">${slot.statusLabel}</span>
@@ -629,6 +656,17 @@ function renderAccountSetup() {
       </div>
       <div class="slot-launch-config">
         <label>
+          <span>Account Label</span>
+          <input
+            data-role="slot-alias"
+            type="text"
+            placeholder="work, personal, testing"
+            value="${escapeHtml(slot.alias || "")}"
+          />
+        </label>
+      </div>
+      <div class="slot-launch-config">
+        <label>
           <span>Default Launch Mode</span>
           <select data-role="launch-mode">
             <option value="empty" ${slot.launchMode === "empty" ? "selected" : ""}>Empty Window</option>
@@ -646,17 +684,42 @@ function renderAccountSetup() {
         </label>
       </div>
       <div class="slot-actions">
+        <button class="ghost-button" data-action="save-alias">Save Label</button>
         <button class="ghost-button" data-action="save-launch-settings">Save Launch Settings</button>
         <button class="ghost-button" data-action="prepare">Prepare Slot</button>
         <button class="accent-button" data-action="launch" ${slot.launchMode === "custom" && !slot.launchTargetValid ? "disabled" : ""}>Launch VS Code</button>
       </div>
     `;
 
+    card.querySelector('[data-action="save-alias"]').addEventListener("click", () =>
+      runTask(() =>
+        confirmAction(
+          {
+            title: `Save label for ${slotActionLabel(slot)}?`,
+            message:
+              "Harbor will store this human-friendly label and reuse it across account cards, selectors, recovery, health, and session views.",
+            confirmText: "Save Label",
+            details: [
+              `Home key: ${slot.slotKey}`,
+              `Label: ${card.querySelector('[data-role=\"slot-alias\"]').value.trim() || "clear label"}`,
+            ],
+          },
+          async () => {
+            await saveHomeAlias(slot.slotKey, card.querySelector('[data-role="slot-alias"]').value.trim());
+            showToast(`Label updated for ${slotActionLabel(slot)}.`, "success");
+            await refreshAccountSetup();
+            await refreshHomes();
+            await refreshSessions();
+          },
+        ),
+      ),
+    );
+
     card.querySelector('[data-action="save-launch-settings"]').addEventListener("click", () =>
       runTask(() =>
         confirmAction(
           {
-            title: `Save launch settings for ${slot.displayName}?`,
+            title: `Save launch settings for ${slotActionLabel(slot)}?`,
             message:
               "Harbor will store the default launch mode for this slot and validate the custom path if custom mode is selected.",
             confirmText: "Save Launch Settings",
@@ -675,7 +738,7 @@ function renderAccountSetup() {
               }),
             });
             showToast(
-              `Launch settings updated for ${slot.displayName}. Reinstall launchers if you also use terminal wrappers.`,
+              `Launch settings updated for ${slotActionLabel(slot)}. Reinstall launchers if you also use terminal wrappers.`,
               "success",
             );
             await refreshAccountSetup();
@@ -690,7 +753,7 @@ function renderAccountSetup() {
       runTask(() =>
         confirmAction(
           {
-            title: `Prepare ${slot.displayName}?`,
+            title: `Prepare ${slotActionLabel(slot)}?`,
             message: "Harbor will create the isolated folders and runtime directories for this account slot.",
             confirmText: "Prepare Slot",
             details: [slot.homePath, slot.launcherPath],
@@ -701,7 +764,7 @@ function renderAccountSetup() {
               body: JSON.stringify({ slotKey: slot.slotKey }),
             });
             appendAccountSetupLog(result);
-            showToast(`${slot.displayName} siap dipakai.`, "success");
+            showToast(`${slotActionLabel(slot)} siap dipakai.`, "success");
             await refreshAccountSetup();
             await refreshHomes();
             await refreshSessions();
@@ -714,7 +777,7 @@ function renderAccountSetup() {
       runTask(() =>
         confirmAction(
           {
-            title: `Launch ${slot.displayName}?`,
+            title: `Launch ${slotActionLabel(slot)}?`,
             message:
               "Harbor will launch this slot using the saved default launch mode. Save Launch Settings first if you changed the mode or target in the card.",
             confirmText: "Launch VS Code",
@@ -729,7 +792,7 @@ function renderAccountSetup() {
               body: JSON.stringify({ slotKey: slot.slotKey }),
             });
             appendAccountSetupLog(result);
-            showToast(`Membuka ${slot.displayName} di VS Code.`, "success");
+            showToast(`Membuka ${slotActionLabel(slot)} di VS Code.`, "success");
             await refreshAccountSetup();
             await refreshHomes();
           },
@@ -768,6 +831,7 @@ function renderHomes() {
     const card = document.createElement("article");
     card.className = "home-card";
     const accountBits = [
+      homeSecondaryLabel(home),
       home.account?.email || "No auth.json",
       home.account?.plan ? `plan ${home.account.plan}` : null,
       home.account?.accountIdSuffix ? `acct …${home.account.accountIdSuffix}` : null,
@@ -778,23 +842,59 @@ function renderHomes() {
     card.innerHTML = `
       <div class="home-head">
         <div>
-          <h4>${home.label}</h4>
+          <h4>${homeDisplayLabel(home)}</h4>
           <p class="muted">${accountBits}</p>
         </div>
         <span class="chip">${home.sessionCount} threads</span>
       </div>
       <p class="path">${home.path}</p>
+      <div class="slot-launch-config">
+        <label>
+          <span>Home Label</span>
+          <input
+            data-role="home-alias"
+            type="text"
+            placeholder="work, personal, staging"
+            value="${escapeHtml(home.alias || "")}"
+          />
+        </label>
+      </div>
       <div class="home-actions">
+        <button class="ghost-button" data-action="save-alias">Save Label</button>
         <button class="ghost-button" data-action="repair">Repair Home</button>
         ${home.canArchive ? `<button class="warn-button" data-action="archive">Archive No-Auth Slot</button>` : ""}
       </div>
     `;
 
+    card.querySelector('[data-action="save-alias"]').addEventListener("click", () =>
+      runTask(() =>
+        confirmAction(
+          {
+            title: `Save label for ${homeDisplayLabel(home)}?`,
+            message:
+              "Harbor will store this label and reuse it across selectors, Health, Recovery, backups, and session views.",
+            confirmText: "Save Label",
+            details: [
+              `Home key: ${home.label}`,
+              `Label: ${card.querySelector('[data-role=\"home-alias\"]').value.trim() || "clear label"}`,
+            ],
+          },
+          async () => {
+            await saveHomeAlias(home.label, card.querySelector('[data-role="home-alias"]').value.trim());
+            showToast(`Label updated for ${homeDisplayLabel(home)}.`, "success");
+            await refreshAccountSetup();
+            await refreshHomes();
+            await refreshSessions();
+          },
+        ),
+      ),
+    );
+
     card.querySelector('[data-action="repair"]').addEventListener("click", () =>
       runTask(() =>
         confirmAction(
           {
-            title: `Repair ${home.label}?`,
+            title: `Repair ${homeDisplayLabel(home)}?`,
             message:
               "Harbor will detach shared session links and optionally reset the VS Code ChatGPT state for this home.",
             confirmText: "Repair Home",
@@ -815,7 +915,7 @@ function renderHomes() {
               }),
             });
             appendRepairLog(result);
-            showToast(`Repair finished for ${home.label}.`, "success");
+            showToast(`Repair finished for ${homeDisplayLabel(home)}.`, "success");
             await refreshHomes();
           },
         ),
@@ -827,7 +927,7 @@ function renderHomes() {
         runTask(() =>
           confirmAction(
             {
-              title: `Archive ${home.label}?`,
+              title: `Archive ${homeDisplayLabel(home)}?`,
               message:
                 "Harbor will move this isolated slot into an archive folder instead of deleting it.",
               confirmText: "Archive Slot",
@@ -845,7 +945,7 @@ function renderHomes() {
                 body: JSON.stringify({ homePath: home.path }),
               });
               repairLog.textContent = result.operations.join("\n");
-              showToast(`${home.label} archived.`, "success");
+              showToast(`${homeDisplayLabel(home)} archived.`, "success");
               await refreshAccountSetup();
               await refreshHomes();
               await refreshSessions();
@@ -1331,17 +1431,17 @@ function populateHomeSelectors() {
   state.homes.forEach((home) => {
     const targetOption = document.createElement("option");
     targetOption.value = home.path;
-    targetOption.textContent = `${home.label} · ${home.account?.email || "no auth"}`;
+    targetOption.textContent = `${homeDisplayLabel(home)} · ${home.account?.email || "no auth"}`;
     targetHomeSelect.append(targetOption);
 
     const sourceOption = document.createElement("option");
     sourceOption.value = home.path;
-    sourceOption.textContent = `${home.label} · ${home.account?.email || "no auth"}`;
+    sourceOption.textContent = `${homeDisplayLabel(home)} · ${home.account?.email || "no auth"}`;
     sourceHomeSelect.append(sourceOption);
 
     const shareSourceOption = document.createElement("option");
     shareSourceOption.value = home.path;
-    shareSourceOption.textContent = `${home.label} · ${home.account?.email || "no auth"}`;
+    shareSourceOption.textContent = `${homeDisplayLabel(home)} · ${home.account?.email || "no auth"}`;
     shareSourceHomeSelect.append(shareSourceOption);
   });
 
@@ -1559,6 +1659,7 @@ function getVisibleRestoreTargets() {
 
     const haystack = [
       home.label,
+      home.alias,
       home.account?.email,
       home.path,
       home.account?.plan,
@@ -1698,7 +1799,7 @@ function renderRestoreTargets() {
     state.restoreTargetPresets.forEach((preset) => {
       const resolvedLabels = preset.resolvedHomes
         .slice(0, 3)
-        .map((home) => home.label)
+        .map((home) => home.displayLabel || home.label)
         .join(", ");
       const extraResolved = preset.resolvedHomes.length > 3
         ? ` +${preset.resolvedHomes.length - 3} more`
@@ -1880,7 +1981,8 @@ function renderRestoreTargets() {
     option.innerHTML = `
       <input type="checkbox" data-home-path="${escapeHtml(home.path)}" ${checked ? "checked" : ""} />
       <div>
-        <strong>${escapeHtml(home.label)}</strong>
+        <strong>${escapeHtml(homeDisplayLabel(home))}</strong>
+        ${home.alias ? `<p class="muted">${escapeHtml(home.label)}</p>` : ""}
         <p>${escapeHtml(home.account?.email || "no auth")} · ${home.sessionCount} threads</p>
         <p class="path">${escapeHtml(home.path)}</p>
       </div>

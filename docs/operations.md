@@ -42,7 +42,8 @@ If this is a fresh install:
 8. optionally click `Install Launchers` so terminal wrappers follow the current launch model
 9. use `Prepare All Slots` in the Account Login Dock
 10. launch `Account 1`, sign in inside the AI extension you want, then refresh slots until the email appears
-11. repeat for `Account 2` and `Account 3`
+11. optionally save a short label such as `work`, `personal`, or `testing` for each slot
+12. repeat for `Account 2` and `Account 3`
 
 ### Onboard Account 1, 2, 3
 
@@ -57,9 +58,32 @@ The intended setup flow is:
 7. in that fresh window, open the ChatGPT, Codex, Claude, Copilot, or Gemini extension and run its sign-in flow
 8. complete browser login for the exact account that belongs to that slot
 9. return to Harbor and click `Refresh Slots`
-10. confirm the email now appears on that account card before moving to the next slot
+10. optionally save or adjust the slot label once you know what that account is for
+11. confirm the email now appears on that account card before moving to the next slot
 
 If you also launch slots from the terminal using `code-codex-*`, run `Install Launchers` after saving launch settings so the wrappers pick up the new default target.
+
+### Label Accounts / Homes
+
+Use labels when `codex-1`, `codex-2`, and `main` are too abstract for daily work.
+
+1. open either the `Account Login Dock` or `Homes` panel
+2. enter a short label such as `work`, `personal`, `testing`, or a team name
+3. click `Save Label`
+4. Harbor stores the label in its own config and refreshes the UI
+
+Behavior:
+
+1. labels are Harbor-only metadata; they do not modify `auth.json`, session logs, or VS Code state
+2. clearing the field and saving removes the label and falls back to the canonical key such as `main` or `codex-2`
+3. the saved label is reused across:
+   - Homes
+   - Account Login Dock
+   - Session Shuttle selectors and results
+   - Recovery target selection and saved presets
+   - Backup Catalog
+   - Health Check
+   - Audit summaries
 
 ### Shared Extensions, Isolated Auth
 
@@ -330,10 +354,7 @@ These rules are the whole reason the project exists:
 
 Things that are not implemented yet:
 
-- preview of session content before import
 - undo flow for imports
-- audit log UI
-- per-account labels editable from the app
 - background sync rules
 - multi-user authentication
 
